@@ -86,8 +86,13 @@ export class ApiService {
     // Низкоуровневый POST
     // ------------------------------------------------------------------
     async _sendPostRequest(url, payloadData, actionComment = '', tag = null, skipAuthHandling = false) {
-        networkLed.requestStarted();
+    networkLed.requestStarted();
+
+    // actionComment === null → silent-запрос: не трогаем статус-бар вообще.
+    const showStatus = actionComment !== null && actionComment !== undefined;
+    if (showStatus) {
         apiStatus.show(actionComment || 'Обработка...');
+    }
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), API.REQUEST_TIMEOUT_MS);
@@ -101,14 +106,11 @@ export class ApiService {
             "Accept": "application/json",
             "Content-Type": "application/json"
         };
-        // Не отправляем токен, если включен режим тестирования
-        if (!AUTH.BYPASS_AUTH) {
-            const access = authStore.getAccess();
-            if (access) headers["Authorization"] = "Bearer " + access;
-        }
-        const access = authStore.getAccess();
-        if (access) headers["Authorization"] = "Bearer " + access;
-
+       // Не отправляем токен, если включен режим тестирования
+if (!AUTH.BYPASS_AUTH) {
+    const access = authStore.getAccess();
+    if (access) headers["Authorization"] = "Bearer " + access;
+}
         try {
             const response = await fetch(url, {
                 method: "POST",
@@ -177,8 +179,10 @@ export class ApiService {
             };
 
         } finally {
-            apiStatus.hide();
-            networkLed.requestFinished();
+    if (showStatus) {
+        apiStatus.hide();
+    }
+    networkLed.requestFinished();
 
             if (tag) {
                 const set = this._activeByTag.get(tag);

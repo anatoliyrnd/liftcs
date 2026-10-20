@@ -102,11 +102,21 @@ class OfflineDB {
         return await db.count('outbox');
     }
 
-    async getOutboxBatch(limit = 10) {
-        const db = await this.dbPromise;
-        const all = await db.getAll('outbox');
-        return all.slice(0, limit); // Берем первые N
+   async getOutboxBatch(limit = 10) {
+    const db = await this.dbPromise;
+    const tx = db.transaction('outbox', 'readonly');
+    const store = tx.objectStore('outbox');
+
+    // Курсор не читает оставшиеся записи — в отличие от getAll.
+    const batch = [];
+    let cursor = await store.openCursor();
+    while (cursor && batch.length < limit) {
+        batch.push(cursor.value);
+        cursor = await cursor.continue();
     }
+    await tx.done;
+    return batch;
+}
     async getAllFromOutbox() {
         const db = await this.dbPromise;
         return await db.getAll('outbox');
@@ -120,9 +130,44 @@ class OfflineDB {
         await tx.done;
     }
 
-    async clearOutbox() {
+        async clearOutbox() {
         const db = await this.dbPromise;
         await db.clear('outbox');
+    }
+
+    // --- Кэш заявок ---
+    async saveTickets(type, tickets) {
+    const db = await this.dbPromise;
+    const tx = db.transaction('tickets_cache', 'readwrite');
+    const store = tx.objectStore('tickets_cache');
+
+    // Точечно вычищаем старый кэш нужного типа через курсор — не читаем
+    // чужие типы (open/close) в память, как это делал getAll().
+    let cursor = await store.openCursor();
+    while (cursor) {
+        if (cursor.value._type === type) {
+            // Fire-and-forget: операция копится в буфере текущей транзакции,
+            // курсор не теряет позицию. .catch(() => {}) гасит возможный
+            // unhandled rejection — реальная ошибка всплывёт в tx.done ниже.
+            cursor.delete().catch(() => {});
+        }
+        cursor = await cursor.continue();
+    }
+
+    // Записываем новые данные пачкой
+    for (const t of tickets) {
+        store.put({ ...t, _type: type });
+    }
+
+    // Закрываем транзакцию — здесь браузер атомарно применит
+    // все удаления и записи на диск, либо откатит целиком.
+    await tx.done;
+    }
+
+    async getTickets(type) {
+        const db = await this.dbPromise;
+        const all = await db.getAll('tickets_cache');
+        return all.filter(t => t._type === type);
     }
 }
 
