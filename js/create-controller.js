@@ -30,45 +30,55 @@ export class CreateController {
         // Проверяем, пришли ли мы из карточки после закрытия с галочкой «создать новую»
         this.prefilledAddress = null;
         if (appState.pendingCreateAddress) {
-            const ctx = appState.pendingCreateAddress;
-            appState.pendingCreateAddress = null;   // одноразовый
-            this.prefilledAddress = ctx;
+            this.prefilledAddress = appState.pendingCreateAddress;
+            appState.pendingCreateAddress = null; // одноразовый
 
-            // Заполняем поле адреса
-            const addrInput = document.getElementById('formAddress');
-            if (addrInput) {
-                addrInput.value = ctx.address || '';
-                addrInput.readOnly = true;
-                addrInput.classList.add('address-locked');
-                addrInput.title = 'Адрес нельзя изменить: заявка создаётся для того же объекта';
-            }
-
-            // Подпись под полем
-            const addrHint = document.getElementById('formAddressHint');
-            if (addrHint && ctx.from_ticket_id) {
-                addrHint.textContent = '📍 Адрес из заявки №' + ctx.from_ticket_id + ' — объект наследуется автоматически';
-                addrHint.style.display = 'block';
-            }
-
-            // Обновляем заголовок страницы — чтобы было понятно, что это не «обычное» создание
-            const h1 = document.querySelector('.create-form-wrapper h1')
-                || document.querySelector('h1');
-            if (h1 && ctx.from_ticket_id) {
-                h1.textContent = 'Новая заявка для объекта из заявки №' + ctx.from_ticket_id;
+            // Обновляем заголовок страницы
+            const h1 = document.querySelector('.create-form-wrapper h1') || document.querySelector('h1');
+            if (h1 && this.prefilledAddress.from_ticket_id) {
+                h1.textContent = 'Новая заявка для объекта из заявки №' + this.prefilledAddress.from_ticket_id;
             }
         }
         // === Инициализация AddressPicker ===
         const addressSlot = document.getElementById('formAddressSlot');
         if (addressSlot && !this.addressPicker) {
+            const isPrefilled = !!this.prefilledAddress; // Есть ли наследованный адрес?
+
             this.addressPicker = createAddressPicker({
+                readOnly: isPrefilled, // <--- Передаем флаг
                 onChange: (data) => {
                     this._updateSaveBtnState();
                 }
             });
             addressSlot.innerHTML = '';
             addressSlot.appendChild(this.addressPicker.element);
-        }
 
+            // Если есть предзаполненный адрес (из закрытой заявки) — подставляем его!
+            if (isPrefilled) {
+                this.addressPicker.setValue(this.prefilledAddress);
+
+                // Показываем подсказку под полем
+                const addrHint = document.getElementById('formAddressHint');
+                if (addrHint && this.prefilledAddress.from_ticket_id) {
+                    addrHint.textContent = '📍 Адрес из заявки №' + this.prefilledAddress.from_ticket_id + ' — объект наследуется автоматически';
+                    addrHint.style.display = 'block';
+                }
+            }
+        }
+        const formContainer = document.querySelector('.create-form-wrapper');
+        if (formContainer) {
+            formContainer.onkeydown = (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    const saveBtn = document.getElementById('saveTicketBtn');
+                    if (saveBtn && !saveBtn.disabled) saveBtn.click();
+                }
+            };
+            // Слушаем изменения для автосохранения
+            formContainer.oninput = () => {
+                clearTimeout(this._draftTimer);
+                this._draftTimer = setTimeout(() => this._saveDraft(), 1000);
+            };
+        }
         // Компонент выбора механика с поиском
         const staffSlot = document.getElementById('formStaffSlot');
         if (staffSlot && !this.staffSelect) {
@@ -112,7 +122,7 @@ export class CreateController {
                 this[s.ref] = comp;
             }
         });
-
+        this._checkDraft();
         this._updateSaveBtnState();
         // Голосовой ввод для textarea описания
         const formDetails = document.getElementById('formDetails');
@@ -215,6 +225,7 @@ export class CreateController {
 
                     // Успешное сохранение онлайн
                     if (response && response.status === 'ok') {
+                        this._clearDraft(); // Очищаем черновик после успешного создания
                         this._setSaveBtnState('success');
                         const msg = response.message || 'Заявка зарегистрирована.';
                         logHistoryAction(msg);
@@ -247,6 +258,39 @@ export class CreateController {
                 }
             };
         }
+    }
+    _saveDraft() {
+        const details = document.getElementById('formDetails')?.value || '';
+        const address = this.addressPicker?.getValue();
+        const staffId = this.staffSelect?.getValue();
+        const dept = this.deptSelect?.getValue();
+        const req = this.reqSelect?.getValue();
+        const grp = this.groupSelect?.getValue();
+        const repair = this.repairPicker?.getValue();
+
+        if (!details && !address) return; // Не сохраняем пустоту
+
+        const draft = { details, address, staffId, dept, req, grp, repair };
+        sessionStorage.setItem('create_draft', JSON.stringify(draft));
+    }
+
+    _clearDraft() {
+        sessionStorage.removeItem('create_draft');
+    }
+
+    _checkDraft() {
+        const raw = sessionStorage.getItem('create_draft');
+        if (!raw) return;
+        try {
+            const draft = JSON.parse(raw);
+            if (confirm('Найден несохраненный черновик заявки. Восстановить данные?')) {
+                if (draft.details) document.getElementById('formDetails').value = draft.details;
+                if (draft.address && this.addressPicker) this.addressPicker.setValue(draft.address);
+                // ... (аналогично для селектов, если нужно, но лучше восстановить хотя бы текст и адрес)
+            } else {
+                this._clearDraft();
+            }
+        } catch (e) {}
     }
     /**
      * Блокирует форму создания. Все клики запрещены,
@@ -306,6 +350,7 @@ export class CreateController {
         const hasCaps = formDetails && VALIDATION.CAPS_REGEX.test(formDetails.value);
 
         const allFilled =
+            this.addressPicker?.isValid() &&
             this.deptSelect?.isValid() &&
             this.reqSelect?.isValid() &&
             this.groupSelect?.isValid() &&
@@ -381,13 +426,13 @@ export class CreateController {
             clearTimeout(this.autoReturnTimer);
             this.autoReturnTimer = null;
         }
-        if (this.addressPicker && typeof this.addressPicker.destroy === 'function') {
-            this.addressPicker.destroy();
-        }
-        ['staffSelect', 'repairPicker', 'deptSelect', 'reqSelect', 'groupSelect'].forEach(name => {
+        //if (this.addressPicker && typeof this.addressPicker.destroy === 'function') {
+          //  this.addressPicker.destroy();
+      //  }
+        ['staffSelect', 'repairPicker', 'deptSelect', 'reqSelect', 'groupSelect', 'addressPicker'].forEach(name => {
             const comp = this[name];
             if (comp && typeof comp.destroy === 'function') comp.destroy();
-            this[name] = null;
+            this[name] = null; // <--- ВАЖНО: здесь очищается ссылка на объект
         });
     }
 }

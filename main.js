@@ -1,12 +1,12 @@
 import { Router } from './js/route/router.js';
 import { ApiService } from './js/api-service.js';
-import { mainPageTemplate, createPageTemplate, detailsPageTemplate, loginPageTemplate } from './js/route/pages.js';
+import { mainPageTemplate, createPageTemplate, detailsPageTemplate, loginPageTemplate,settingsPageTemplate } from './js/route/pages.js';
 import { NotificationsPoller } from './js/notifications-poller.js';
 import { setRouter as setNotifyRouter } from './js/components/notify.js';
 import { ThemeController } from './js/theme-controller.js';
 import { MenuManager } from './js/route/menu-manager.js';
 import { InactivityTracker } from './js/route/inactivity-tracker.js';
-import { API } from './js/config.js';
+import { API, AUTH } from './js/config.js'; // <--- Добавлен AUTH
 import { authStore } from './js/auth-store.js';
 import { TicketsController } from './js/tickets-controller.js';
 import { CreateController } from './js/create-controller.js';
@@ -17,26 +17,24 @@ import { logHistoryAction } from './js/history-logger.js';
 import { offlineDB } from './js/offline-db.js';
 import { flattenAddresses } from './js/utils/address-flattener.js';
 import { SyncManager } from './js/sync-manager.js';
-
+import { SettingsController } from './js/settings-controller.js'; // Новый импорт
 const api = new ApiService(API.URL, { local: false });
 const router = new Router(() => authStore.hasAccess());
 
 let openTicketsArray = [];
 let closedTicketsArray = [];
-
+//instance
 const openTicketsCtrl = new TicketsController(api, router, 'open');
 const closedTicketsCtrl = new TicketsController(api, router, 'close');
 const createCtrl = new CreateController(api, router);
 const detailsCtrl = new DetailsController(api, router);
 const loginCtrl = new LoginController(api, router);
-
+const settingsCtrl = new SettingsController(api, router);
 let menuManager = null;
 let notifPoller = null;
 let inactivityTracker = null;
+let syncManager = null; // <--- ВЫНЕСЕНО В НАЧАЛО
 
-/**
- * Синхронизация UI (показ/скрытие Истории, Профиля, кнопок, запуск поллинга).
- */
 function syncAuthUI() {
     const historyWrapper = document.getElementById('historyWrapper');
     const userProfileWrapper = document.getElementById('userProfileWrapper');
@@ -47,11 +45,9 @@ function syncAuthUI() {
     const isAuth = authStore.hasAccess();
 
     if (isAuth && user) {
-        // ВАЖНО: для истории ставим flex, так как в CSS у нее display: flex;
         if (historyWrapper) historyWrapper.style.display = 'flex';
         if (userProfileWrapper) userProfileWrapper.style.display = 'flex';
 
-        // Устанавливаем имя и аватарку (первая буква имени)
         if (navUserName) navUserName.textContent = user.name || 'Пользователь';
         if (navUserAvatar) {
             navUserAvatar.textContent = user.name ? user.name.charAt(0).toUpperCase() : 'U';
@@ -86,18 +82,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     new ThemeController('themeToggle');
     setNotifyRouter(router);
 
-    // 1. Пытаемся восстановить сессию
-    await api.tryAutoLogin();
+    window.addEventListener('triggerSync', () => {
+        if (syncManager) syncManager.startSync();
+    });
 
-    // 2. Если авторизованы — ЖДЁМ загрузку конфига и справочников!
+    window.addEventListener('refreshSyncState', () => {
+        if (openTicketsCtrl) openTicketsCtrl._updateSyncButton();
+    });
+
+    // 1. Обход авторизации или обычный вход
+    if (AUTH.BYPASS_AUTH) {
+        console.warn('⚠️ ВНИМАНИЕ: Авторизация отключена (BYPASS_AUTH = true)!');
+        authStore.setSession('mock-token', Date.now() + 86400000, {
+            id: 1,
+            name: 'Тестовый Доступ',
+            role: 'guest' // Роль перезапишется из config, который придет с сервера
+        });
+    } else {
+        await api.tryAutoLogin();
+    }
+
     if (authStore.hasAccess()) {
         menuManager = new MenuManager(api, router, 'dynamicMenu');
         await menuManager.initialize();
 
-        // --- НОВЫЙ БЛОК: Загрузка и кэширование адресов ---
         try {
             console.log('[App] Проверка адресов в офлайн-базе...');
-            // Проверяем, есть ли уже города в базе
             let cities = await offlineDB.getCities();
 
             if (cities.length === 0) {
@@ -111,18 +121,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } else {
                 console.log('[App] Адреса уже есть в базе (городов: ' + cities.length + ').');
-                // В фоне можно обновлять адреса, но для первого запуска хватит и этого
             }
         } catch (err) {
             console.error('[App] Ошибка при загрузке адресов:', err);
-            // Если мы офлайн, но адреса уже были в базе — приложение продолжит работать
         }
-        // ---------------------------------------------------
     }
 
     syncAuthUI();
 
-    // 3. Логика выпадающего меню профиля
+    // Меню профиля
     const userProfileBtn = document.getElementById('userProfileBtn');
     const userDropdown = document.getElementById('userDropdown');
     const userProfileWrapper = document.getElementById('userProfileWrapper');
@@ -140,7 +147,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         };
 
-        // Клик вне меню закрывает его
         document.addEventListener('click', (e) => {
             if (!userProfileWrapper.contains(e.target)) {
                 userDropdown.classList.remove('show');
@@ -149,7 +155,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // 4. Кнопка «Выйти» (внутри меню)
+    // Кнопка выхода
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
         logoutBtn.onclick = async () => {
@@ -162,23 +168,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     }
 
-    // 5. Логотип
     const navLogo = document.getElementById('navLogo');
     if (navLogo) navLogo.addEventListener('click', () => router.navigate('#/'));
 
-    // 6. Реакция на потерю сессии
-    window.addEventListener(ApiService.AUTH_LOST_EVENT, (e) => {
-        authStore.clear();
-        syncAuthUI();
-        const reason = e.detail && e.detail.reason;
-        let msg = 'Сессия истекла, войдите заново';
-        if (reason === 'device_mismatch') msg = 'Устройство изменилось, войдите заново';
-        logHistoryAction(msg);
-        notify.warning(msg);
-        router.navigate('#/login');
-    });
+    // 2. Слушатель потери сессии (отключаем в тестовом режиме)
+    if (!AUTH.BYPASS_AUTH) {
+        window.addEventListener(ApiService.AUTH_LOST_EVENT, (e) => {
+            authStore.clear();
+            syncAuthUI();
+            const reason = e.detail && e.detail.reason;
+            let msg = 'Сессия истекла, войдите заново';
+            if (reason === 'device_mismatch') msg = 'Устройство изменилось, войдите заново';
+            logHistoryAction(msg);
+            notify.warning(msg);
+            router.navigate('#/login');
+        });
+    }
 
-    // 7. Регистрация роутов
+    // Роуты
     router.addRoute('#/login', () => loginPageTemplate(), () => loginCtrl.mount());
     router.addRoute('#/', () => mainPageTemplate(), () => {
         closedTicketsCtrl.unmount();
@@ -197,7 +204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const allTicketsCombined = [...openTicketsArray, ...closedTicketsArray];
         detailsCtrl.mount(ticketId, allTicketsCombined);
     });
-
+    router.addRoute('#/settings', () => settingsPageTemplate(), () => settingsCtrl.mount());
     window.addEventListener('hashchange', () => {
         const hash = window.location.hash || '#/';
         if (hash === '#/login' || hash === '#/') {
@@ -209,25 +216,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const createPlaceholderRoute = (title) => () => `<div class="container"><h1>${title}</h1><p style="color:var(--text-secondary); margin-top:10px;">Экран находится в разработке автономного режима.</p></div>`;
     router.addRoute('#/reports', createPlaceholderRoute('Аналитические Отчеты'));
     router.addRoute('#/addresses', createPlaceholderRoute('Реестр лифтовых адресов'));
-    router.addRoute('#/settings', createPlaceholderRoute('Системные Настройки'));
     router.addRoute('#/more', createPlaceholderRoute('Прочие инструменты диспетчера'));
     router.addRoute('#/profile', createPlaceholderRoute('Личный кабинет'));
-// --- Инициализация менеджера синхронизации ---
-    const syncManager = new SyncManager(api, (newTickets) => {
-        // Обновляем массив в памяти
+
+    // 3. Инициализация SyncManager (без const!)
+    syncManager = new SyncManager(api, router, (newTickets) => {
         openTicketsArray.length = 0;
         openTicketsArray.push(...newTickets);
 
-        // Если мы сейчас на главной странице, перерисовываем таблицу
         if (window.location.hash === '#/' || window.location.hash === '') {
             openTicketsCtrl.mount(openTicketsArray);
         }
     });
 
-    // При старте, если мы офлайн, но есть очередь — пробуем запустить (вдруг сеть есть, но браузер не понял)
+    // Делаем инстанс доступным для контроллера таблицы (для проверки статуса синхронизации)
+    window.syncManagerInstance = syncManager;
+
     if (navigator.onLine) {
         setTimeout(() => syncManager.startSync(), 1000);
     }
-    // 8. Ручной старт роутера (Справочники уже в памяти!)
+
+    // 4. Ручной старт роутера
     router._handleRoute();
 });

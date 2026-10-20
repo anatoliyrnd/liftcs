@@ -14,7 +14,7 @@ export class SyncManager {
         this.api = api;
         this.onOpenTicketsUpdated = onOpenTicketsUpdated;
         this.isSyncing = false;
-
+        this._cooldownUntil = 0; // Время, до которого кнопка заблокирована
         // Слушаем появление сети
         window.addEventListener('online', () => this.startSync());
     }
@@ -22,21 +22,36 @@ export class SyncManager {
     async startSync() {
         if (this.isSyncing || !authStore.hasAccess()) return;
 
+        // Проверка кулдауна (если недавно была ошибка)
+        if (Date.now() < this._cooldownUntil) {
+            const waitMins = Math.ceil((this._cooldownUntil - Date.now()) / 60000);
+            notify.warning(`Синхронизация заблокирована. Попробуйте через ${waitMins} мин.`);
+            return;
+        }
+
         const count = await offlineDB.getOutboxCount();
         if (count === 0) return;
 
         this.isSyncing = true;
-        networkLed.setState('loading'); // Желтый/крутящийся индикатор
+
+        // Включаем спиннер на кнопке
+        const btn = document.getElementById('refreshBtn');
+        if (btn) btn.classList.add('is-syncing');
+
+        window.dispatchEvent(new Event('refreshSyncState')); // Обновляем UI (блокируем кнопку)
+
+        networkLed.setState('loading');
         logHistoryAction(`Обнаружено ${count} офлайн-заявок. Начинаем синхронизацию...`);
 
         try {
             await this._syncLoop();
         } catch (err) {
             console.error('[SyncManager] Ошибка синхронизации:', err);
-            logHistoryAction('Сбой синхронизации: ' + err.message);
         } finally {
             this.isSyncing = false;
-            networkLed.setState('online'); // Возвращаем зеленый
+            if (btn) btn.classList.remove('is-syncing');
+            networkLed.setState('online');
+            window.dispatchEvent(new Event('refreshSyncState')); // Разблокируем UI
         }
     }
 
@@ -82,7 +97,7 @@ export class SyncManager {
             } catch (err) {
                 retries++;
                 if (retries >= OFFLINE.MAX_SYNC_RETRIES) {
-                    this._showSyncErrorModal(err.message);
+                    await this._showSyncErrorModal(err.message);
                     return; // Прерываем цикл
                 }
                 // Ждем 2 секунды перед следующей попыткой
@@ -94,17 +109,50 @@ export class SyncManager {
         notify.success('Офлайн-заявки отправлены на сервер.');
     }
 
-    _showSyncErrorModal(errorMsg) {
-        const confirmDelete = confirm(
-            `Не удалось синхронизировать заявки.\n` +
-            `Ошибка: ${errorMsg}\n\n` +
-            `Продолжить работу в онлайн-режиме? ВСЕ ОФЛАЙН-ЗАЯВКИ БУДУТ УДАЛЕНЫ.`
+   async _showSyncErrorModal(errorMsg) {
+           const user = authStore.getUser() || { id: 'unknown', name: 'Неизвестно' };
+
+           // 1. Получаем количество заявок до формирования текста
+           const outboxCount = await offlineDB.getOutboxCount();
+
+           // 2. Формируем диагностический текст
+           const diagText = `=== ДИАГНОСТИКА СБОЯ СИНХРОНИЗАЦИИ ===\n` +
+               `Время: ${new Date().toLocaleString('ru')}\n` +
+               `Пользователь: ${user.name} (ID: ${user.id})\n` +
+               `Ошибка сервера: ${errorMsg}\n` +
+               `Зависших заявок: ${outboxCount}\n\n` +
+               `Скопируйте этот текст и передайте администратору.`;
+
+
+        // prompt позволяет пользователю скопировать текст
+        const action = prompt(
+            `Не удалось синхронизировать заявки после 5 попыток.\n\n` +
+            `Нажмите ОК, чтобы УДАЛИТЬ заявки и работать онлайн.\n` +
+            `Нажмите Отмена, чтобы сохранить заявки и попробовать позже.\n\n` +
+            `--- ДИАГНОСТИКА (для копирования) ---\n${diagText}`,
+            diagText
         );
-        if (confirmDelete) {
-            offlineDB.clearOutbox().then(() => {
-                logHistoryAction('Офлайн-заявки удалены пользователем.');
-                notify.info('Офлайн-заявки удалены.');
-            });
+       this._cooldownUntil = Date.now() + OFFLINE.SYNC_COOLDOWN_MS;
+        // Если пользователь нажал ОК (action !== null)
+        if (action !== null) {
+            const confirmDelete = confirm("ВНИМАНИЕ! Все офлайн-заявки будут удалены навсегда. Вы уверены?");
+            if (confirmDelete) {
+                offlineDB.clearOutbox().then(async () => {
+                    logHistoryAction('Офлайн-заявки удалены пользователем.');
+                    notify.warning('Офлайн-заявки удалены. Вы работаете в онлайн-режиме.');
+                    if (this.router) this.router.navigate('#/');
+
+                    // Обновляем кнопку (скрываем бейдж)
+                    window.dispatchEvent(new Event('refreshSyncState'));
+                });
+            }
+        } else {
+            // Нажали отмену — блокируем кнопку на 3 секунды (защита от спама)
+            const btn = document.getElementById('refreshBtn');
+            if (btn) {
+                btn.disabled = true;
+                setTimeout(() => btn.disabled = false, 3000);
+            }
         }
     }
 }

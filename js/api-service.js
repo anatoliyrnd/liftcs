@@ -101,6 +101,11 @@ export class ApiService {
             "Accept": "application/json",
             "Content-Type": "application/json"
         };
+        // Не отправляем токен, если включен режим тестирования
+        if (!AUTH.BYPASS_AUTH) {
+            const access = authStore.getAccess();
+            if (access) headers["Authorization"] = "Bearer " + access;
+        }
         const access = authStore.getAccess();
         if (access) headers["Authorization"] = "Bearer " + access;
 
@@ -126,6 +131,10 @@ export class ApiService {
 
             // Ошибка внутри JSON
             if (data && data.status === 'error' && !skipAuthHandling) {
+                // Если тестовый режим — просто отдаем ошибку, не выкидываем на логин
+                if (AUTH.BYPASS_AUTH) {
+                    return data;
+                }
                 const code = data.code || '';
 
                 if (code === 'token_expired' || code === 'missing_token' || code === 'token_invalid') {

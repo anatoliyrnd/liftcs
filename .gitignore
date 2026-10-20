@@ -1,0 +1,21 @@
+API_PROTOCOL.md
+AUTH_PROTOCOL.md
+config.json
+data.json
+exemple.json
+exempleclose.json
+open.json
+script.js
+table-config.js
+TECHNICAL_DEBT.md
+test.php
+test2.php
+test3.php
+.idea/.gitignore
+.idea/.name
+.idea/php.xml
+.idea/modules.xml
+.idea/yiiframeworksettings.xml
+.idea/новый журнал заявок.iml
+.osp/project.ini
+lift-auth-stub.json

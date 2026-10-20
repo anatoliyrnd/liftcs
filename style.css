@@ -1610,3 +1610,116 @@ table[data-mode="open"] td[data-col-id="close_date"] {
     min-height: 12px;
     line-height: 1;
 }
+/* Активный фильтр по городам (оранжевый акцент) */
+#cityFilterBtn.filter-active {
+    border-color: #f59e0b !important;
+    color: #f59e0b !important;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+}
+
+#cityFilterBtn.filter-active svg {
+    fill: #f59e0b;
+}
+
+/* Стили для списка чекбоксов городов */
+.city-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 0;
+}
+.city-checkbox-item input {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+/* Если выбраны не все города, подсвечиваем и чекбокс "Выбрать все" */
+#citySelectAll:indeterminate {
+    accent-color: #f59e0b;
+}
+
+/* Состояние загрузки для кнопки обновления */
+#refreshBtn.is-syncing svg {
+    animation: spin 1s linear infinite;
+    color: #f59e0b; /* Оранжевый во время синхронизации */
+}
+
+#refreshBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Затемнение фона при открытом фильтре городов */
+.filter-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 999;
+    display: none;
+    backdrop-filter: blur(2px); /* Легкое размытие для красоты */
+}
+/* ==========================================================================
+   СТИЛИ ДЛЯ ADDRESS PICKER (Группировка и Пилюли)
+   ========================================================================== */
+.address-pills-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.address-pill {
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.address-pill:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.05); /* Легкий фон при наведении */
+}
+
+/* Подсветка при навигации с клавиатуры */
+.address-pill.keyboard-active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--mark-text);
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+}
+
+/* Если дом кликабельный (режим house/any) */
+.selectable-house {
+    padding: 4px 8px;
+    margin-left: -8px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.selectable-house:hover,
+.selectable-house.keyboard-active {
+    background: var(--table-row-hover);
+    color: var(--accent);
+}
+
+.recent-address-item:hover {
+    background: var(--table-row-hover);
+}
+/* Подложка для AddressPicker */
+#addressPickerBackdrop {
+    z-index: 999;
+}
+
+/* Выпадающий список адресов должен быть выше подложки */
+.address-picker-wrap .search-input + div {
+    z-index: 1000 !important;
+}

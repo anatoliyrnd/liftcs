@@ -64,12 +64,33 @@ class OfflineDB {
         const db = await this.dbPromise;
         const all = await db.getAllFromIndex('address_flat', 'city_id', cityId);
         const q = query.toLowerCase().trim();
-        if (!q) return [];
 
-        // Ищем вхождение подстроки в сплющенной строке
-        return all.filter(item => item.search_string.includes(q)).slice(0, 15); // Ограничиваем 15 результатами
+        // Если пусто — отдаем первые 50
+        if (!q) {
+            return all.slice(0, 50);
+        }
+
+        // Разбиваем запрос на токены (слова)
+        const tokens = q.split(' ').filter(t => t.length > 0);
+        const results = [];
+
+        for (const item of all) {
+            // Разбиваем строку поиска на слова
+            const words = item.search_string.split(' ');
+
+            // Проверяем: каждое слово из запроса должно быть началом хотя бы одного слова в базе
+            const isMatch = tokens.every(token =>
+                words.some(word => word.startsWith(token))
+            );
+
+            if (isMatch) {
+                results.push(item);
+                if (results.length >= 50) break; // Ограничиваем 50 результатами
+            }
+        }
+
+        return results;
     }
-
     // --- Очередь заявок (Outbox) ---
     async addToOutbox(ticket) {
         const db = await this.dbPromise;

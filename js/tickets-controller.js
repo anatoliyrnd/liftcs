@@ -6,6 +6,9 @@ import { renderPeriodSelector } from './table/period-selector.js';
 import { API } from './config.js';
 import {logHistoryAction} from './history-logger.js';
 import { offlineDB } from './offline-db.js';
+import { UI } from './config.js';
+import { parseServerDate } from './utils/date-utils.js';
+import { SyncManager } from './sync-manager.js'; // нам нужен будет доступ к синхронизации
 export class TicketsController {
     /**
      * @param {ApiService} apiInstance - Экземпляр сетевого клиента
@@ -26,6 +29,14 @@ export class TicketsController {
         // Флаг стейта загрузки: сбрасывается только явным действием пользователя.
         // При ошибке сети НЕ выставляется в true — вкладка не «залипает».
         this.isLoaded = false;
+        this._searchDebounceTimer = null;
+
+        // Настройки фильтров
+        this._filters = {
+            cities: [], // массив ID
+            hideLongRepair: false
+        };
+        this._allCities = []; // Список всех городов для дропдауна
     }
 
     /**
@@ -37,7 +48,14 @@ export class TicketsController {
         if (!dataTable) return;
 
         dataTable.setAttribute('data-mode', this.dataType);
-
+        if (this.dataType === 'open') {
+            await this._initFilters();
+            await this._updateSyncButton();
+        } else {
+            // Для закрытых заявок скрываем фильтры
+            const filtersBlock = document.getElementById('openOnlyFilters');
+            if (filtersBlock) filtersBlock.style.display = 'none';
+        }
         this._initPeriodSelector(globalTicketsArrayRef);
 
         // 1. МГНОВЕННЫЙ РЕНДЕР из того, что уже лежит в памяти.
@@ -186,12 +204,40 @@ export class TicketsController {
      * Полный перерендер таблицы + навешивание кликов на строки.
      */
     _renderTableFull(dataTable, globalTicketsArrayRef) {
+
+        this._currentTicketsRef = globalTicketsArrayRef; // Сохраняем ссылку для фильтров
+
+        // ПРИМЕНЯЕМ ФИЛЬТРЫ (только для открытых)
+        let filteredData = [...globalTicketsArrayRef];
+        if (this.dataType === 'open') {
+            const maxDate = new Date();
+            maxDate.setDate(maxDate.getDate() + UI.FILTER_REPAIR_DAYS);
+
+            filteredData = filteredData.filter(t => {
+                // 1. Фильтр по городам
+                if (t.city_id && !this._filters.cities.includes(Number(t.city_id))) {
+                    return false;
+                }
+
+                // 2. Фильтр по дате ремонта
+                if (this._filters.hideLongRepair) {
+                    const rDate = parseServerDate(t.repair_time);
+                    if (rDate && rDate > maxDate) {
+                        return false; // Скрываем, если дата больше, чем сегодня + 14 дней
+                    }
+                }
+                return true; // Если repair_time пустой — оставляем
+            });
+        }
+
         rebuildTableHeaders(
             dataTable,
             (th, colId, type) => this._handleSort(th, colId, type),
             () => this._refreshRowsCache()
         );
-        renderTableBody(dataTable, globalTicketsArrayRef);
+
+        // Передаем отфильтрованный массив
+        renderTableBody(dataTable, filteredData);
 
         this._refreshRowsCache();
         this._initSearch();
@@ -307,7 +353,220 @@ export class TicketsController {
         rows.forEach(row => tbody.appendChild(row));
         this._refreshRowsCache();
     }
+    async _initFilters() {
+        const filtersBlock = document.getElementById('openOnlyFilters');
+        if (filtersBlock) filtersBlock.style.display = 'flex';
 
+        // Установка лейбла для чекбокса срока
+        const label = document.getElementById('hideLongRepairLabel');
+        if (label) label.textContent = UI.FILTER_REPAIR_LABEL;
+
+        // Восстановление из localStorage
+        const savedCities = localStorage.getItem('filter_cities');
+        const savedHideLong = localStorage.getItem('filter_hide_long');
+
+        this._filters.hideLongRepair = savedHideLong === 'true';
+        const hideCheck = document.getElementById('hideLongRepair');
+        if (hideCheck) hideCheck.checked = this._filters.hideLongRepair;
+
+        // Получаем все города из IndexedDB
+        this._allCities = await offlineDB.getCities();
+
+        if (savedCities) {
+            this._filters.cities = JSON.parse(savedCities);
+        } else {
+            this._filters.cities = this._allCities.map(c => c.id); // По умолчанию все
+        }
+
+        this._renderCityDropdown();
+
+        // Обработчики
+        const cityBtn = document.getElementById('cityFilterBtn');
+        const cityDropdown = document.getElementById('cityFilterDropdown');
+
+        // Создаем подложку для затемнения (один раз)
+        let backdrop = document.getElementById('cityFilterBackdrop');
+        if (!backdrop) {
+            backdrop = document.createElement('div');
+            backdrop.id = 'cityFilterBackdrop';
+            backdrop.className = 'filter-backdrop';
+            document.body.appendChild(backdrop);
+
+            // Клик по затемнению закрывает дропдаун
+            backdrop.onclick = () => {
+                cityDropdown.style.display = 'none';
+                backdrop.style.display = 'none';
+            };
+        }
+
+        if (cityBtn && cityDropdown) {
+            cityBtn.onclick = (e) => {
+                e.stopPropagation();
+                const isHidden = cityDropdown.style.display === 'none' || !cityDropdown.style.display;
+                if (isHidden) {
+                    cityDropdown.style.display = 'block';
+                    backdrop.style.display = 'block'; // Включаем затемнение
+                } else {
+                    cityDropdown.style.display = 'none';
+                    backdrop.style.display = 'none';  // Выключаем
+                }
+            };
+
+            // Глобальный клик для закрытия
+            document.addEventListener('click', (e) => {
+                if (!cityBtn.contains(e.target) && !cityDropdown.contains(e.target)) {
+                    cityDropdown.style.display = 'none';
+                    backdrop.style.display = 'none';
+                }
+            });
+        }
+        const selectAllCb = document.getElementById('citySelectAll');
+        if (selectAllCb) {
+            selectAllCb.onchange = (e) => {
+                if (e.target.checked) {
+                    this._filters.cities = this._allCities.map(c => c.id);
+                } else {
+                    // Оставляем только первый город, чтобы не было пусто
+                    this._filters.cities = [this._allCities[0].id];
+                }
+                this._saveFilters();
+                this._renderCityDropdown();
+                this._applyLocalFilters();
+            };
+        }
+
+        const hideCb = document.getElementById('hideLongRepair');
+        if (hideCb) {
+            hideCb.onchange = (e) => {
+                this._filters.hideLongRepair = e.target.checked;
+                this._saveFilters();
+                this._applyLocalFilters();
+            };
+        }
+    }
+
+    _renderCityDropdown() {
+        const list = document.getElementById('cityCheckboxList');
+        const btn = document.getElementById('cityFilterBtn');
+        const btnText = document.getElementById('cityFilterText');
+        const selectAllCb = document.getElementById('citySelectAll');
+        if (!list || !btn) return;
+
+        list.innerHTML = '';
+        this._allCities.forEach(city => {
+            const isChecked = this._filters.cities.includes(city.id);
+            const item = document.createElement('label');
+            item.className = 'city-checkbox-item';
+            item.innerHTML = `
+                <input type="checkbox" value="${city.id}" ${isChecked ? 'checked' : ''}>
+                <span>${city.name}</span>
+            `;
+            const cb = item.querySelector('input');
+            cb.onchange = (e) => {
+                if (e.target.checked) {
+                    if (!this._filters.cities.includes(city.id)) this._filters.cities.push(city.id);
+                } else {
+                    if (this._filters.cities.length === 1) {
+                        e.preventDefault();
+                        e.target.checked = true; // Возвращаем галочку
+                        // notify.warning('Хотя бы один город должен быть выбран'); // Если импортирован notify
+                        return;
+                    }
+                    this._filters.cities = this._filters.cities.filter(id => id !== city.id);
+                }
+                this._saveFilters();
+                this._renderCityDropdown();
+                this._applyLocalFilters();
+            };
+            list.appendChild(item);
+        });
+
+        // Обновление кнопки и чекбокса "Выбрать все"
+        const allSelected = this._filters.cities.length === this._allCities.length;
+        const noneSelected = this._filters.cities.length === 0;
+
+        if (allSelected) {
+            btnText.textContent = 'Города: Все';
+            btn.classList.remove('filter-active');
+            if (selectAllCb) { selectAllCb.checked = true; selectAllCb.indeterminate = false; }
+        } else {
+            btnText.textContent = `Города: ${this._filters.cities.length} из ${this._allCities.length}`;
+            btn.classList.add('filter-active'); // Оранжевый акцент
+            if (selectAllCb) { selectAllCb.checked = false; selectAllCb.indeterminate = !noneSelected; }
+        }
+    }
+
+    _saveFilters() {
+        localStorage.setItem('filter_cities', JSON.stringify(this._filters.cities));
+        localStorage.setItem('filter_hide_long', this._filters.hideLongRepair.toString());
+    }
+
+    _applyLocalFilters() {
+        // Перефильтровываем текущие строки
+        const dataTable = document.getElementById('dataTable');
+        if (!dataTable) return;
+        const rows = dataTable.querySelectorAll('tbody tr');
+        const maxDate = new Date();
+        maxDate.setDate(maxDate.getDate() + UI.FILTER_REPAIR_DAYS);
+
+        rows.forEach(tr => {
+            const ticketId = tr.querySelector('td[data-col-id="id"]')?.textContent.trim();
+            // Нам нужно взять данные заявки из памяти по ID.
+            // Так как DOM не хранит все данные (city_id, repair_time),
+            // лучше сделать фильтрацию ДО рендера таблицы.
+        });
+
+        // Самый надежный способ - перерендерить таблицу с новыми фильтрами
+        this._renderTableFull(document.getElementById('dataTable'), this._currentTicketsRef);
+    }
+
+    async _updateSyncButton() {
+        const count = await offlineDB.getOutboxCount();
+        const btn = document.getElementById('refreshBtn');
+        const badge = document.getElementById('syncBadge');
+        if (!btn || !badge) return;
+
+        // Если синхронизация идет прямо сейчас — кнопка заблокирована
+        if (window.syncManagerInstance && window.syncManagerInstance.isSyncing) {
+            btn.disabled = true;
+            btn.title = 'Идет синхронизация...';
+            return;
+        }
+
+        // Проверка кулдауна
+        if (window.syncManagerInstance && Date.now() < window.syncManagerInstance._cooldownUntil) {
+            const waitMins = Math.ceil((window.syncManagerInstance._cooldownUntil - Date.now()) / 60000);
+            btn.disabled = true;
+            btn.title = `Синхронизация заблокирована на ${waitMins} мин. из-за ошибки.`;
+            btn.style.color = 'var(--text-secondary)';
+            return;
+        }
+
+        btn.disabled = false; // Разблокируем, если всё ок
+
+        if (count > 0) {
+            btn.style.color = '#f59e0b';
+            btn.title = `Нажмите, чтобы синхронизировать ${count} офлайн-заявок`;
+            badge.textContent = count;
+            badge.style.display = 'block';
+
+            btn.onclick = (e) => {
+                e.preventDefault();
+                window.dispatchEvent(new Event('triggerSync'));
+            };
+        } else {
+            btn.style.color = 'var(--text-primary)';
+            btn.title = 'Перезагрузить данные';
+            badge.style.display = 'none';
+
+            btn.onclick = (e) => {
+                if (e) e.preventDefault();
+                this.unmount();
+                this.isLoaded = false;
+                this.mount(this._currentTicketsRef);
+            };
+        }
+    }
 
 
 }
