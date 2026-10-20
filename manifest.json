@@ -1,5 +1,6 @@
 {
-  "name": "Лift-Мониторинг",
+  "id": "/index.html",
+  "name": "Лифт-Мониторинг",
   "short_name": "Лифты",
   "description": "Система диспетчеризации лифтов",
   "start_url": "./index.html",
@@ -17,6 +18,22 @@
       "src": "./icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "./icons/screen-wide.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Журнал открытых заявок"
+    },
+    {
+      "src": "./icons/screen-mobile.png",
+      "sizes": "397x882",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Журнал заявок на мобильном"
     }
   ]
 }
