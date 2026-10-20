@@ -1,0 +1,21 @@
+{
+    "refresh": {
+        "9242ec0c0c8ab10dfd85a83566a1ed75c047c5c3c724f595f5e2f2fb28f01754": {
+            "user_id": 1,
+            "device_fingerprint": "full:WebKit|ANGLE (Intel, Intel(R) UHD Graphics 730 (0x00004692) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+            "expires_at": 1794992724,
+            "created_at": 1792400724,
+            "last_used_at": 1792408817
+        }
+    },
+    "access": {
+        "1": {
+            "token": "1055e89830df0c23a5ed254edb9f658c9e31a9eba650258cf311a04d7cad4073",
+            "expires_at": 1792416017,
+            "user_id": 1,
+            "user_name": "\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440",
+            "role": "administrator",
+            "webgl_info": "full:WebKit|ANGLE (Intel, Intel(R) UHD Graphics 730 (0x00004692) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+        }
+    }
+}
