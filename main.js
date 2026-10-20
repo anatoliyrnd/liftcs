@@ -235,6 +235,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (navigator.onLine) {
         setTimeout(() => syncManager.startSync(), 1000);
     }
+// 5. Регистрация Service Worker для PWA
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(registration => {
+                    console.log('✅ Service Worker зарегистрирован. Область:', registration.scope);
+                })
+                .catch(error => {
+                    console.error('❌ Ошибка регистрации Service Worker:', error);
+                });
+        });
+    }
 
     // 4. Ручной старт роутера
     router._handleRoute();
