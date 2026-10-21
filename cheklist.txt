@@ -91,3 +91,200 @@ xml.php (старый файл Spult для понимания интеграц�
 
 Если всё готово, можешь создавать новый чат и прикреплять туда эти файлы! Если нужно что-то еще добавить в хендофф — пиши.
 
+Часть 1: SQL-схемы (Необходимые изменения и таблицы)
+1. Master DB (Глобальная база)
+Здесь только одна новая таблица для управления организациями:
+
+sql
+CREATE TABLE `lift_organizations` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `org_key` VARCHAR(50) NOT NULL UNIQUE COMMENT 'Ключ для входа на устройстве',
+  `org_name` VARCHAR(255) NOT NULL,
+  `db_host` VARCHAR(100) NOT NULL,
+  `db_name` VARCHAR(100) NOT NULL,
+  `db_user` VARCHAR(100) NOT NULL,
+  `db_password` VARCHAR(255) NOT NULL,
+  `is_active` TINYINT(1) DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+2. Tenant DB (База организации)
+Добавляем недостающие поля и таблицы в ту базу, дамп которой ты присылал.
+
+Для таблицы lift_calls (защита от дублей):
+
+sql
+ALTER TABLE `lift_calls` 
+ADD COLUMN `offline_uuid` VARCHAR(64) NULL DEFAULT NULL COMMENT 'UUID офлайн-заявки',
+ADD UNIQUE INDEX `idx_offline_uuid` (`offline_uuid`);
+Для таблицы lift_users (Профиль, роль, токены, настройки):
+
+sql
+ALTER TABLE `lift_users` 
+ADD COLUMN `user_role` VARCHAR(30) NOT NULL DEFAULT 'dispatcher' COMMENT 'administrator, dispatcher, engineer, guest',
+ADD COLUMN `user_surname` VARCHAR(100) NOT NULL DEFAULT '',
+ADD COLUMN `user_patronymic` VARCHAR(100) NOT NULL DEFAULT '',
+ADD COLUMN `user_column_settings` TEXT NULL DEFAULT NULL COMMENT 'JSON настройки таблицы',
+ADD COLUMN `user_token_expires_at` DATETIME NULL,
+ADD COLUMN `user_token_created_at` DATETIME NULL;
+Таблица для Refresh-токенов (httpOnly cookie):
+
+sql
+CREATE TABLE `lift_refresh_tokens` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NOT NULL,
+  `token_hash` CHAR(64) NOT NULL UNIQUE,
+  `device_fingerprint` TEXT NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `last_used_at` DATETIME NULL,
+  FOREIGN KEY (`user_id`) REFERENCES `lift_users`(`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Таблица привязки к Spult LKDS:
+
+sql
+CREATE TABLE `lift_lkds_bindings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `global_object_id` INT NOT NULL COMMENT 'ID лифта из Master DB',
+  `lkds_domain_id` INT NOT NULL COMMENT 'ID из программы Spult',
+  `lkds_lift_name` VARCHAR(255) NULL,
+  UNIQUE KEY `uq_lkds` (`lkds_domain_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Часть 2: Код TicketService.php
+Этот сервис использует PDODB и реализует ту самую логику бизнес-дублей, о которой мы договаривались.
+
+php
+<?php
+declare(strict_types=1);
+
+namespace mainSRC\services;
+
+use mainSRC\dataBase\PDODB;
+use Exception;
+
+class TicketService
+{
+    private PDODB $db;
+
+    public function __construct()
+    {
+        // Предполагается, что PDODB настроен на текущую Tenant DB
+        $this->db = PDODB::getInstance();
+    }
+
+    /**
+     * Создает новую заявку или объединяет с существующей.
+     * 
+     * @param array $data Нормализованные данные от SPA или Spult
+     * @return int ID созданной или обновленной заявки (call_id)
+     * @throws Exception
+     */
+    public function createOrMerge(array $data): int
+    {
+        // 1. Защита от повторной синхронизации офлайн-пачки (Идемпотентность)
+        if (!empty($data['offline_uuid'])) {
+            $alreadyExists = $this->db->single(
+                "SELECT call_id FROM lift_calls WHERE offline_uuid = :uuid",
+                ['uuid' => $data['offline_uuid']]
+            );
+            if ($alreadyExists) {
+                return (int)$alreadyExists; // Молча возвращаем ID, заявка уже создана
+            }
+        }
+
+        // 2. Поиск бизнес-дубля (Лифт + Тип неисправности + Отдел)
+        // call_status = 0 означает, что заявка открыта
+        $existing = $this->db->row(
+            "SELECT call_id, call_details FROM lift_calls 
+             WHERE call_status = 0 
+               AND address_lift = :lift_id 
+               AND call_request = :req_id 
+               AND call_department = :dept_id 
+             LIMIT 1",
+            [
+                'lift_id' => $data['object_id'],
+                'req_id'  => $data['request_id'],
+                'dept_id' => $data['department_id']
+            ]
+        );
+
+        if ($existing) {
+            // 3. Нашли дубль — дописываем текст в существующее описание
+            $dateStr = date('d.m.Y H:i');
+            $author = $data['author_name'] ?? 'Система';
+            $source = $data['source'] ?? 'API'; // 'SPA', 'Offline', 'Spult'
+            
+            $newDetails = $existing['call_details'] 
+                . "\n\n--- [Дубль от {$dateStr} | Источник: {$source} | Автор: {$author}]: \n" 
+                . $data['details'];
+
+            $this->db->update('lift_calls', 
+                ['call_details' => $newDetails], 
+                ['call_id' => $existing['call_id']]
+            );
+
+            return (int)$existing['call_id'];
+        }
+
+        // 4. Дубля нет — создаем новую заявку (Маппинг API -> Legacy DB)
+        $insertData = [
+            'offline_uuid'         => $data['offline_uuid'] ?? null,
+            'call_status'          => 0, // 0 = открыта
+            'call_date'            => time(),
+            'call_first_name'      => $data['author_name'] ?? 'API',
+            'call_department'      => $data['department_id'],
+            'call_request'         => $data['request_id'],
+            'call_group'           => $data['group_id'],
+            'call_adres'           => $data['fullAddress'],
+            'call_details'         => $data['details'],
+            'call_solution'        => '',
+            'call_user'            => $data['user_id'] ?? 0,
+            'call_staff'           => $data['staff_id'] ?? 0,
+            'address_city'         => $data['city_id'],
+            'address_street'       => $data['street_id'],
+            'address_home'         => $data['home_id'],
+            'address_lift'         => $data['object_id'],
+            'expected_repair_time' => $data['repair_time']
+        ];
+
+        return (int)$this->db->insert('lift_calls', $insertData);
+    }
+
+    /**
+     * Добавление комментария (заметки) к заявке.
+     */
+    public function addNote(int $callId, string $noteText, int $userId, string $userName): bool
+    {
+        $this->db->beginTransaction();
+        try {
+            // 1. Вставляем заметку в таблицу lift_notes
+            $this->db->insert('lift_notes', [
+                'note_title'     => 'Комментарий',
+                'note_body'      => $noteText,
+                'note_relation'  => $callId,
+                'note_type'      => 1, // Тип: обычный комментарий
+                'note_post_date' => time(),
+                'note_post_user' => $userId
+            ]);
+
+            // 2. Пишем в историю заявки
+            $historyText = "{$userName} добавил(а) комментарий: " . mb_substr($noteText, 0, 100) . "...";
+            $this->db->insert('lift_history', [
+                'history_date' => time(),
+                'history_info' => $historyText,
+                'call_id'      => $callId
+            ]);
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+    }
+}
+💡 Как это работает в контексте архитектуры:
+В api.php (или test_calls.php) при получении запроса callnew ты просто создаешь экземпляр new TicketService() и вызываешь createOrMerge($input).
+
+Если это пачка офлайн-заявок (callNewOffline), ты оборачиваешь вызовы createOrMerge в цикл внутри $db->beginTransaction() и $db->commit(). Если хотя бы одна упадет с ошибкой — rollBack() отменит всю пачку.
+
+Для Spult в xml.php ты тоже вызываешь createOrMerge(), но передаешь source = 'Spult'. Если Spult пришлет ту же аварию, что уже висит в SPA, сервис просто допишет данные диагностики в описание, а не создаст вторую заявку.
+
