@@ -37,12 +37,12 @@ export class CreateController {
       appState.pendingCreateAddress = null;
       sessionStorage.removeItem("create_draft");
       const h1 =
-          document.querySelector(".create-form-wrapper h1") ||
-          document.querySelector("h1");
+        document.querySelector(".create-form-wrapper h1") ||
+        document.querySelector("h1");
       if (h1 && this.prefilledAddress.from_ticket_id) {
         h1.textContent =
-            "Новая заявка для объекта из заявки №" +
-            this.prefilledAddress.from_ticket_id;
+          "Новая заявка для объекта из заявки №" +
+          this.prefilledAddress.from_ticket_id;
       }
     }
 
@@ -64,9 +64,9 @@ export class CreateController {
         const addrHint = document.getElementById("formAddressHint");
         if (addrHint && this.prefilledAddress.from_ticket_id) {
           addrHint.textContent =
-              "📍 Адрес из заявки №" +
-              this.prefilledAddress.from_ticket_id +
-              " — объект наследуется автоматически";
+            "📍 Адрес из заявки №" +
+            this.prefilledAddress.from_ticket_id +
+            " — объект наследуется автоматически";
           addrHint.style.display = "block";
         }
       }
@@ -108,24 +108,28 @@ export class CreateController {
       repairSlot.appendChild(this.repairPicker.element);
     }
 
+    // В методе mount() контроллера
     const slots = [
+      // 1. Группа (теперь первая)
+      {
+        id: "createGroupSlot",
+        key: "group",
+        ref: "groupSelect",
+        placeholder: "— выберите группу —",
+      },
+      // 2. Отдел
       {
         id: "createDeptSlot",
         key: "department",
         ref: "deptSelect",
         placeholder: "— выберите отдел —",
       },
+      // 3. Тип запроса
       {
         id: "createReqSlot",
         key: "request",
         ref: "reqSelect",
         placeholder: "— выберите тип —",
-      },
-      {
-        id: "createGroupSlot",
-        key: "group",
-        ref: "groupSelect",
-        placeholder: "— выберите группу —",
       },
     ];
 
@@ -136,7 +140,25 @@ export class CreateController {
           key: s.key,
           placeholder: s.placeholder,
           required: true,
-          onChange: () => this._updateSaveBtnState(),
+          onChange: (value, isValid) => {
+            // 1. Обновляем состояние кнопки "Сохранить"
+            this._updateSaveBtnState();
+
+            // 2. ЛОГИКА ДЛЯ "ЗАСТРЕВАНИЯ"
+            // Проверяем, что изменилась именно группа и её ID равен 4 (Застревание)
+            if (s.key === "group" && value === "4") {
+              if (this.repairPicker) {
+                // Получаем текущий UNIX timestamp в секундах и добавляем 40 минут (2400 секунд)
+                const fortyMinsLater = Math.floor(Date.now() / 1000) + 40 * 60;
+
+                // Устанавливаем это время в виджет
+                this.repairPicker.setValue(fortyMinsLater);
+
+                // Опционально: уведомляем пользователя, чтобы он не удивился
+                // notify.info("Время ремонта автоматически установлено на +40 минут");
+              }
+            }
+          },
         });
         container.innerHTML = "";
         container.appendChild(comp.element);
@@ -151,8 +173,8 @@ export class CreateController {
     const formDetailsRow = document.getElementById("formDetailsRow");
     if (formDetails) {
       initVoiceTextarea(
-          formDetails,
-          formDetailsRow ? { container: formDetailsRow } : {},
+        formDetails,
+        formDetailsRow ? { container: formDetailsRow } : {},
       );
     }
 
@@ -174,14 +196,14 @@ export class CreateController {
     if (saveBtn) {
       saveBtn.onclick = async () => {
         const addressData = this.addressPicker
-            ? this.addressPicker.getValue()
-            : null;
+          ? this.addressPicker.getValue()
+          : null;
         const details = document.getElementById("formDetails").value.trim();
         const staffId = this.staffSelect ? this.staffSelect.getValue() : null;
 
         if (!addressData || !details) {
           const msg =
-              "Заполните обязательные поля: выберите адрес и введите описание проблемы.";
+            "Заполните обязательные поля: выберите адрес и введите описание проблемы.";
           notify.error(msg);
           logHistoryAction(msg);
           return;
@@ -189,16 +211,16 @@ export class CreateController {
 
         if (this.repairPicker && !this.repairPicker.isValid()) {
           const msg =
-              "Дата ремонта указана некорректно: должна быть не менее чем через 25 минут от текущего момента.";
+            "Дата ремонта указана некорректно: должна быть не менее чем через 25 минут от текущего момента.";
           notify.error(msg);
           logHistoryAction(msg);
           return;
         }
 
         if (
-            !this.deptSelect?.isValid() ||
-            !this.reqSelect?.isValid() ||
-            !this.groupSelect?.isValid()
+          !this.deptSelect?.isValid() ||
+          !this.reqSelect?.isValid() ||
+          !this.groupSelect?.isValid()
         ) {
           const msg = "Пожалуйста, выберите отдел, тип запроса и группу.";
           notify.error(msg);
@@ -208,9 +230,9 @@ export class CreateController {
 
         // Собираем чистый payload (без action) для онлайн и офлайн режимов
         const newTicketPayload = this._buildCallnewPayload(
-            addressData,
-            details,
-            staffId
+          addressData,
+          details,
+          staffId,
         );
 
         this._lockForm();
@@ -224,8 +246,8 @@ export class CreateController {
         try {
           // ДОБАВЛЯЕМ action: 'callnew' К PAYLOAD
           const response = await this.api.post(
-              { action: "callnew", ...newTicketPayload },
-              "Запись инцидента...",
+            { action: "callnew", ...newTicketPayload },
+            "Запись инцидента...",
           );
 
           if (response && response.code === "network_error") {
@@ -243,16 +265,19 @@ export class CreateController {
             // ВАРИАНТ B: Запрашиваем свежий список открытых заявок
             try {
               const freshOpen = await this.api.post(
-                  { data: "open" },
-                  null, // silent, без статус-бара
-                  "global"
+                { data: "open" },
+                null, // silent, без статус-бара
+                "global",
               );
               if (Array.isArray(freshOpen)) {
                 globalTicketsArrayRef.length = 0;
                 globalTicketsArrayRef.push(...freshOpen);
               }
             } catch (e) {
-              console.warn("[CreateController] Не удалось обновить список open", e);
+              console.warn(
+                "[CreateController] Не удалось обновить список open",
+                e,
+              );
               // Даже если не удалось обновить, заявка на сервере создана.
               // Просто перекидываем пользователя.
             }
@@ -263,7 +288,7 @@ export class CreateController {
             }, UI.AUTO_RETURN_MS);
           } else {
             const msg =
-                (response && response.message) || "Не удалось создать заявку.";
+              (response && response.message) || "Не удалось создать заявку.";
             this._setSaveBtnState("error");
             logHistoryAction(msg);
             notify.error(msg);
@@ -327,7 +352,7 @@ export class CreateController {
     try {
       const draft = JSON.parse(raw);
       if (
-          confirm("Найден несохраненный черновик заявки. Восстановить данные?")
+        confirm("Найден несохраненный черновик заявки. Восстановить данные?")
       ) {
         if (draft.details)
           document.getElementById("formDetails").value = draft.details;
@@ -335,14 +360,11 @@ export class CreateController {
         if (draft.address && this.addressPicker)
           this.addressPicker.setValue(draft.address);
 
-        if (draft.dept && this.deptSelect)
-          this.deptSelect.setValue(draft.dept);
+        if (draft.dept && this.deptSelect) this.deptSelect.setValue(draft.dept);
 
-        if (draft.req && this.reqSelect)
-          this.reqSelect.setValue(draft.req);
+        if (draft.req && this.reqSelect) this.reqSelect.setValue(draft.req);
 
-        if (draft.grp && this.groupSelect)
-          this.groupSelect.setValue(draft.grp);
+        if (draft.grp && this.groupSelect) this.groupSelect.setValue(draft.grp);
 
         if (draft.staffId && this.staffSelect)
           this.staffSelect.setValue(draft.staffId);
@@ -402,14 +424,14 @@ export class CreateController {
 
     const formDetails = document.getElementById("formDetails");
     const hasCaps =
-        formDetails && VALIDATION.CAPS_REGEX.test(formDetails.value);
+      formDetails && VALIDATION.CAPS_REGEX.test(formDetails.value);
 
     const allFilled =
-        this.addressPicker?.isValid() &&
-        this.deptSelect?.isValid() &&
-        this.reqSelect?.isValid() &&
-        this.groupSelect?.isValid() &&
-        !hasCaps;
+      this.addressPicker?.isValid() &&
+      this.deptSelect?.isValid() &&
+      this.reqSelect?.isValid() &&
+      this.groupSelect?.isValid() &&
+      !hasCaps;
 
     btn.disabled = !allFilled;
     btn.style.opacity = allFilled ? "1" : "0.5";
@@ -433,7 +455,7 @@ export class CreateController {
 
       const user = authStore.getUser();
       const uuid =
-          "offline_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+        "offline_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
 
       const offlineTicket = {
         uuid: uuid,
@@ -444,13 +466,11 @@ export class CreateController {
         created_at: nowTs(),
       };
 
-
-
       await offlineDB.addToOutbox(offlineTicket);
 
       this._setSaveBtnState("success");
       const msg =
-          "Заявка сохранена локально (нет сети). Синхронизация при восстановлении связи.";
+        "Заявка сохранена локально (нет сети). Синхронизация при восстановлении связи.";
       notify.info(msg);
       logHistoryAction(msg);
 

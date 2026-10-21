@@ -23,6 +23,10 @@ export function createPageTemplate() {
                 <div id="formStaffSlot"></div>
             </div>
                                   <div style="display: flex; flex-direction: column; gap: 12px;">
+                                  <div>
+                    <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Группа *</label>
+                    <div id="createGroupSlot"></div>
+                </div>
                 <div>
                     <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Отдел *</label>
                     <div id="createDeptSlot"></div>
@@ -31,10 +35,7 @@ export function createPageTemplate() {
                     <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Тип запроса *</label>
                     <div id="createReqSlot"></div>
                 </div>
-                <div>
-                    <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Группа *</label>
-                    <div id="createGroupSlot"></div>
-                </div>
+                
             </div>
                         <div>
                 <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Предполагаемое окончание ремонта</label>

@@ -64,7 +64,7 @@ export function renderTableBody(tableElement, serverData) {
 
       const td = document.createElement("td");
       td.setAttribute("data-col-id", col.id);
-
+      td.setAttribute("data-label", col.name);
       const finalWidth = col.width || `${col.minWidth}px`;
       td.style.width = finalWidth;
       td.style.minWidth = `${col.minWidth}px`;

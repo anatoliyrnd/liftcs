@@ -2151,3 +2151,129 @@ td.cell-alert-info {
     color: #ca8a04 !important;
     font-weight: 600;
 }
+/* ==========================================================================
+   МОБИЛЬНАЯ АДАПТАЦИЯ ТАБЛИЦЫ (Карточный вид v3 - Компактный)
+   ========================================================================== */
+@media screen and (max-width: 768px) {
+
+    /* 1. Скрываем шапку таблицы */
+    #dataTable thead {
+        display: none !important;
+    }
+
+    /* 2. Превращаем строки в карточки */
+    #dataTable,
+    #dataTable tbody {
+        display: block !important;
+        width: 100% !important;
+    }
+
+    #dataTable tr {
+        display: block !important;
+        margin-bottom: 10px !important;
+        /* Уменьшили отступ между карточками */
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        background-color: var(--bg-secondary);
+        padding: 8px 12px !important;
+        /* Уменьшили внутренние отступы */
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        position: relative !important;
+    }
+
+    /* 3. Настраиваем ячейки (Убираем фиксированные ширины и фоны) */
+    #dataTable td {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        padding: 6px 0 !important;
+        /* Компактные отступы по вертикали */
+        border: none !important;
+        border-bottom: 1px dashed var(--border-color) !important;
+        white-space: normal !important;
+        height: auto !important;
+
+        /* КРИТИЧЕСКИ ВАЖНО: Убираем остатки липких колонок с ПК */
+        position: static !important;
+        background-color: transparent !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        text-align: left !important;
+        box-sizing: border-box !important;
+    }
+
+    #dataTable td:last-child {
+        border-bottom: none !important;
+        padding-bottom: 0 !important;
+    }
+
+    /* 4. Стилизация названия колонки */
+    #dataTable td::before {
+        content: attr(data-label);
+        font-weight: 700;
+        color: var(--text-secondary);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 2px;
+        /* Прижали заголовок к значению */
+    }
+
+    /* 5. Стилизация самого значения */
+    #dataTable td {
+        font-size: 13.5px;
+        color: var(--text-primary);
+        line-height: 1.3;
+    }
+
+    /* 6. Скрываем лишние колонки */
+    #dataTable td[data-col-id="staff_name"],
+    #dataTable td[data-col-id="notify_status"],
+    #dataTable td[data-col-id="staff_name2"],
+    #dataTable td[data-col-id="notify_status2"],
+    #dataTable td[data-col-id="staff_name3"],
+    #dataTable td[data-col-id="notify_status3"],
+    #dataTable td[data-col-id="department"],
+    #dataTable td[data-col-id="request"],
+    #dataTable td[data-col-id="group"],
+    #dataTable td[data-col-id="other"],
+    #dataTable td[data-col-id="close_name"],
+    #dataTable td[data-col-id="solution"] {
+        display: none !important;
+    }
+
+    /* Выделяем № и Адрес */
+    #dataTable td[data-col-id="id"] {
+        font-weight: 800;
+        font-size: 15px;
+        color: var(--accent);
+    }
+
+    #dataTable td[data-col-id="address"] {
+        font-weight: 600;
+    }
+
+    /* Выделяем время */
+    #dataTable td[data-col-id="date"],
+    #dataTable td[data-col-id="repair_time"],
+    #dataTable td[data-col-id="close_date"] {
+        font-weight: 600;
+        color: var(--text-secondary);
+    }
+
+    /* Убираем тень от зафиксированных колонок */
+    .sticky-freeze-border {
+        box-shadow: none !important;
+        border-right: none !important;
+    }
+
+    /* Кликабельность карточки */
+    #dataTable tbody tr {
+        cursor: pointer;
+    }
+
+    #dataTable tbody tr:active {
+        background-color: var(--table-row-hover);
+    }
+}
