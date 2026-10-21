@@ -7,6 +7,8 @@ import { tableSettings } from './settings.js';
  */
 export function setupResizableColumn(th, resizer) {
     let startX, startWidth;
+    let cachedCells = null;
+    let cachedAddressCells = null;
     const colId = th.getAttribute('data-id');
 
     const colConfig = tableSettings.columns.find(c => c.id === colId);
@@ -21,21 +23,22 @@ export function setupResizableColumn(th, resizer) {
             th.style.width = widthPx;
             th.style.maxWidth = widthPx;
 
-            const table = th.closest('table');
-            if (table) {
-                table.querySelectorAll(`tbody td[data-col-id="${colId}"]`).forEach(td => {
-                    td.style.width = widthPx;
-                    td.style.maxWidth = widthPx;
-                });
+           // Кэш заполняется в mousedown — querySelectorAll больше не на каждом кадре.
+const cells = cachedCells || th.closest('table')?.querySelectorAll(`tbody td[data-col-id="${colId}"]`);
+if (cells) {
+    cells.forEach(td => {
+        td.style.width = widthPx;
+        td.style.maxWidth = widthPx;
+    });
+}
 
-                // Если меняли ширину колонки №, на лету сдвигаем фиксированную колонку Адрес вправо
-                if (colId === 'id') {
-                    table.querySelectorAll(`th[data-id="address"], td[data-col-id="address"]`).forEach(el => {
-                        el.style.left = widthPx;
-                    });
-                }
-            }
-
+if (colId === 'id') {
+    const addrCells = cachedAddressCells
+        || th.closest('table')?.querySelectorAll(`th[data-id="address"], td[data-col-id="address"]`);
+    if (addrCells) {
+        addrCells.forEach(el => { el.style.left = widthPx; });
+    }
+}
             if (colConfig) colConfig.width = widthPx;
         }
     }
@@ -54,12 +57,15 @@ export function setupResizableColumn(th, resizer) {
             th.setAttribute('draggable', 'true');
         }
 
-        resizer.classList.remove('resizing');
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        // Снимаем страховочные слушатели, чтобы не копились
-        window.removeEventListener('blur', onMouseUp);
-        document.removeEventListener('visibilitychange', onVisibilityChange);
+       resizer.classList.remove('resizing');
+document.removeEventListener('mousemove', onMouseMove);
+document.removeEventListener('mouseup', onMouseUp);
+window.removeEventListener('blur', onMouseUp);
+document.removeEventListener('visibilitychange', onVisibilityChange);
+
+// Освобождаем NodeList
+cachedCells = null;
+cachedAddressCells = null;
     }
 
     function onVisibilityChange() {
@@ -77,11 +83,18 @@ export function setupResizableColumn(th, resizer) {
         startX = e.clientX;
         startWidth = th.offsetWidth;
 
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-        // Страховка: если мышь ушла за пределы окна и пользователь отпустил кнопку там —
-        // браузер отдаст событие только после возврата фокуса. Ловим оба сигнала.
-        window.addEventListener('blur', onMouseUp);
-        document.addEventListener('visibilitychange', onVisibilityChange);
+      // ОДИН раз на drag собираем NodeList — дальше onMouseMove только читает.
+const table = th.closest('table');
+if (table) {
+    cachedCells = table.querySelectorAll(`tbody td[data-col-id="${colId}"]`);
+    cachedAddressCells = (colId === 'id')
+        ? table.querySelectorAll(`th[data-id="address"], td[data-col-id="address"]`)
+        : null;
+}
+
+document.addEventListener('mousemove', onMouseMove);
+document.addEventListener('mouseup', onMouseUp);
+window.addEventListener('blur', onMouseUp);
+document.addEventListener('visibilitychange', onVisibilityChange);
     });
 }

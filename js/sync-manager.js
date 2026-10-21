@@ -10,15 +10,26 @@ export class SyncManager {
      * @param {ApiService} api
      * @param {Function} onOpenTicketsUpdated - Колбэк для обновления массива заявок в памяти
      */
-    constructor(api, onOpenTicketsUpdated) {
-        this.api = api;
-        this.onOpenTicketsUpdated = onOpenTicketsUpdated;
-        this.isSyncing = false;
-        this._cooldownUntil = 0; // Время, до которого кнопка заблокирована
-        // Слушаем появление сети
-        window.addEventListener('online', () => this.startSync());
-    }
+    constructor(api, router, onOpenTicketsUpdated) {
+    this.api = api;
+    this.router = router;
+    this.onOpenTicketsUpdated = onOpenTicketsUpdated;
+    this.isSyncing = false;
+    this._cooldownUntil = 0;
 
+    // AbortController — чтобы при destroy() снять online-слушатель
+    this._lifecycleAbort = new AbortController();
+    window.addEventListener(
+        'online',
+        () => this.startSync(),
+        { signal: this._lifecycleAbort.signal }
+    );
+}
+
+destroy() {
+    this._lifecycleAbort?.abort();
+    this._lifecycleAbort = null;
+}
     async startSync() {
         if (this.isSyncing || !authStore.hasAccess()) return;
 
@@ -34,34 +45,44 @@ export class SyncManager {
 
         this.isSyncing = true;
 
-        // Включаем спиннер на кнопке
-        const btn = document.getElementById('refreshBtn');
-        if (btn) btn.classList.add('is-syncing');
+try {
+    const btn = document.getElementById('refreshBtn');
+    if (btn) btn.classList.add('is-syncing');
+    window.dispatchEvent(new Event('refreshSyncState'));
 
-        window.dispatchEvent(new Event('refreshSyncState')); // Обновляем UI (блокируем кнопку)
+    // Используем существующий API networkLed. LED останется зелёным/красным
+    // по фактическому исходу последнего api.post — не будет «ложного online».
+    networkLed.requestStarted();
+    logHistoryAction(`Обнаружено ${count} офлайн-заявок. Начинаем синхронизацию...`);
 
-        networkLed.setState('loading');
-        logHistoryAction(`Обнаружено ${count} офлайн-заявок. Начинаем синхронизацию...`);
-
-        try {
-            await this._syncLoop();
-        } catch (err) {
-            console.error('[SyncManager] Ошибка синхронизации:', err);
-        } finally {
-            this.isSyncing = false;
-            if (btn) btn.classList.remove('is-syncing');
-            networkLed.setState('online');
-            window.dispatchEvent(new Event('refreshSyncState')); // Разблокируем UI
-        }
+    await this._syncLoop();
+} catch (err) {
+    console.error('[SyncManager] Ошибка синхронизации:', err);
+} finally {
+    this.isSyncing = false;
+    const btn = document.getElementById('refreshBtn');
+    if (btn) btn.classList.remove('is-syncing');
+    networkLed.requestFinished();
+    window.dispatchEvent(new Event('refreshSyncState'));
+}
     }
 
     async _syncLoop() {
-        let retries = 0;
+    let retries = 0;
+    let lastSignature = '';
 
-        while (true) {
-            const batch = await offlineDB.getOutboxBatch(OFFLINE.SYNC_BATCH_SIZE);
-            if (batch.length === 0) break; // Очередь пуста, выходим
+    while (true) {
+        const batch = await offlineDB.getOutboxBatch(OFFLINE.SYNC_BATCH_SIZE);
+        if (batch.length === 0) break;
 
+        // Защита от зацикливания: если предыдущая итерация была успешной
+        // (retries === 0), а очередь не уменьшилась — deleteFromOutbox
+        // не сработал. Иначе был бы бесконечный цикл.
+        const signature = batch.map(b => b.uuid).join(',');
+        if (signature === lastSignature && retries === 0) {
+            throw new Error('Синхронизация застряла: очередь не уменьшается после успешного ответа сервера');
+        }
+        lastSignature = signature;
             // Формируем данные для сервера (оригинальный автор + сама заявка)
             const ticketsToSend = batch.map(item => ({
                 ...item.payload,
@@ -77,20 +98,32 @@ export class SyncManager {
                 }, `Отправка заявок (${batch.length} шт.)...`, 'sync');
 
                 if (response && response.status === 'ok') {
-                    // 1. Удаляем отправленные заявки из очереди
-                    const uuids = batch.map(item => item.uuid);
-                    await offlineDB.deleteFromOutbox(uuids);
+    // 1. Сервер уже принял батч — удаляем из очереди.
+    //    Если deleteFromOutbox упадёт (редко) — catch повысит retries,
+    //    и батч уйдёт повторно. Идемпотентность — на бэкенде.
+    const uuids = batch.map(item => item.uuid);
+    await offlineDB.deleteFromOutbox(uuids);
 
-                    // 2. Обновляем список заявок в памяти и кэше, если сервер их прислал
-                    if (response.open_tickets && Array.isArray(response.open_tickets)) {
-                        await offlineDB.saveTickets('open', response.open_tickets);
-                        if (this.onOpenTicketsUpdated) {
-                            this.onOpenTicketsUpdated(response.open_tickets);
-                        }
-                    }
+    // 2. Обновляем память и кэш. Сбой здесь НЕ должен превращаться
+    //    в retries++ — данные уже на сервере, дубль отправки недопустим.
+    if (response.open_tickets && Array.isArray(response.open_tickets)) {
+        try {
+            await offlineDB.saveTickets('open', response.open_tickets);
+        } catch (cacheErr) {
+            console.error('[SyncManager] saveTickets failed:', cacheErr);
+        }
+        if (this.onOpenTicketsUpdated) {
+            try {
+                this.onOpenTicketsUpdated(response.open_tickets);
+            } catch (cbErr) {
+                console.error('[SyncManager] onOpenTicketsUpdated failed:', cbErr);
+            }
+        }
+    }
 
-                    logHistoryAction(`Успешно синхронизировано ${batch.length} заявок.`);
-                    retries = 0; // Сбрасываем счетчик ошибок при успехе
+    logHistoryAction(`Успешно синхронизировано ${batch.length} заявок.`);
+    retries = 0;
+
                 } else {
                     throw new Error(response.message || 'Ошибка сервера');
                 }

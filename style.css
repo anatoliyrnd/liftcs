@@ -1723,3 +1723,416 @@ table[data-mode="open"] td[data-col-id="close_date"] {
 .address-picker-wrap .search-input + div {
     z-index: 1000 !important;
 }
+/* ==========================================================================
+   АДАПТАЦИЯ ПОД НИЗКИЕ ЭКРАНЫ (Ноутбуки 768p и ниже)
+   Срабатывает, когда высота окна меньше 800px
+   ========================================================================== */
+@media (max-height: 800px) {
+
+    /* 1. Сжимаем шапку (навбар) */
+    .navbar {
+        padding: 0.6rem 5% !important;
+    }
+
+    .logo {
+        font-size: 1.1rem !important;
+    }
+
+    /* Корректируем высоту основного контейнера под новую высоту навбара */
+    .container {
+        height: calc(100vh - 53px) !important;
+        padding: 6px !important;
+    }
+
+    /* 2. Сжимаем блок "История" */
+    .history-wrapper {
+        height: 75px !important;
+        /* Было 142px */
+        margin-top: 0.5rem !important;
+        padding: 10px 12px 4px 12px !important;
+    }
+
+    .history-title {
+        font-size: 0.95rem !important;
+    }
+
+    .history-item {
+        font-size: 10px !important;
+        line-height: 1.1 !important;
+    }
+
+   
+
+    /* 3. Уменьшаем заголовки и отступы на страницах */
+    h1 {
+        font-size: 1.3rem !important;
+        margin-bottom: 0.2rem !important;
+        margin-top: 0 !important;
+    }
+
+    .search-container {
+        margin-bottom: 0.5rem !important;
+    }
+
+    .search-input {
+        padding: 0.5rem 0.8rem !important;
+        font-size: 0.9rem !important;
+    }
+
+    /* 4. Адаптация карточки заявки и форм */
+    .ticket-card-layout-grid {
+        padding-top: 5px !important;
+        gap: 1rem !important;
+    }
+
+    /* Уменьшаем поля ввода во всех формах (создание, карточка, логин) */
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select,
+    textarea {
+        padding: 6px 10px !important;
+        font-size: 13px !important;
+        margin-bottom: 4px !important;
+    }
+
+    /* Уменьшаем высоту текстовых областей (комментарии) */
+    textarea {
+        min-height: 60px !important;
+    }
+
+    /* Сжимаем кнопки */
+    .menu-item,
+    .btn-voice-mic {
+        padding: 6px 12px !important;
+        font-size: 13px !important;
+        min-height: 34px !important;
+    }
+}
+/* ==========================================================================
+   УПРАВЛЕНИЕ БЛОКОМ ИСТОРИИ (Сворачивание)
+   ========================================================================== */
+.history-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+}
+
+.history-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border-radius: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.history-toggle-btn:hover {
+    background: var(--table-row-hover);
+    color: var(--accent);
+}
+
+.history-arrow {
+    transition: transform 0.3s ease;
+}
+
+/* Состояние "Свернуто" */
+.history-wrapper.is-collapsed {
+    height: 30px !important;
+    /* Оставляем только заголовок */
+    padding-bottom: 0 !important;
+    border-bottom: none !important;
+    overflow: visible !important;
+}
+
+.history-wrapper.is-collapsed .history-list-container,
+.history-wrapper.is-collapsed #apiStatusBlock,
+.history-wrapper.is-collapsed #inactivityStatusBlock {
+    display: none !important;
+}
+
+/* Поворачиваем стрелочку вниз, когда свернуто */
+.history-wrapper.is-collapsed .history-arrow {
+    transform: rotate(180deg);
+}
+
+/* ==========================================================================
+   ЭКСТРЕМАЛЬНО КОМПАКТНЫЙ РЕЖИМ ДЛЯ НИЗКИХ ЭКРАНОВ (Ноутбуки, 1080x768)
+   ========================================================================== */
+@media (max-height: 600px) {
+
+    /* Уменьшаем базовый шрифт */
+    body {
+        font-size: 13px !important;
+    }
+
+    /* 1. Шапка */
+    .navbar {
+        padding: 0.4rem 5% !important;
+    }
+
+    .logo {
+        font-size: 1rem !important;
+    }
+
+    .theme-toggle-btn {
+        width: 34px !important;
+        height: 34px !important;
+    }
+
+    .container {
+        height: calc(100vh - 48px) !important;
+        padding: 4px !important;
+    }
+
+    /* 2. Блок "История" (когда развернут) */
+    .history-wrapper {
+        height: 100px !important;
+        margin-top: 0.5rem !important;
+        padding: 10px 10px 4px 10px !important;
+    }
+
+    .history-title {
+        font-size: 0.9rem !important;
+    }
+
+    .history-item {
+        font-size: 9.5px !important;
+        line-height: 1.1 !important;
+    }
+
+    /* 3. Заголовки и поиск */
+    h1 {
+        font-size: 1.1rem !important;
+        margin-bottom: 0.2rem !important;
+        margin-top: 0 !important;
+    }
+
+    .search-container {
+        margin-bottom: 0.4rem !important;
+    }
+
+    .search-input {
+        padding: 4px 8px !important;
+        font-size: 12px !important;
+        height: 28px !important;
+    }
+
+    /* 4. Таблица */
+    #dataTable th {
+        padding: 4px 8px !important;
+        font-size: 11px !important;
+        height: 26px !important;
+    }
+
+    #dataTable td {
+        padding: 3px 8px !important;
+        font-size: 11px !important;
+        height: 28px !important;
+    }
+
+    /* 5. Карточки, формы и поля ввода */
+    .ticket-card-layout-grid {
+        padding-top: 2px !important;
+        gap: 0.5rem !important;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    select,
+    textarea {
+        padding: 4px 8px !important;
+        font-size: 12px !important;
+        margin-bottom: 2px !important;
+        min-height: 28px !important;
+    }
+
+    textarea {
+        min-height: 50px !important;
+    }
+
+    /* Уменьшаем лейблы полей (текст над полями) */
+    label {
+        font-size: 11px !important;
+        margin-bottom: 2px !important;
+    }
+
+    /* 6. Кнопки */
+    .menu-item,
+    .btn-voice-mic {
+        padding: 4px 10px !important;
+        font-size: 12px !important;
+        min-height: 30px !important;
+        border-width: 1px !important;
+    }
+
+    .ticket-actions-footer {
+        padding-top: 0.5rem !important;
+    }
+
+    /* Скрываем картинку-аватар в шапке на низких экранах для экономии места по ширине */
+    .user-name {
+        display: none !important;
+    }
+}
+/* ==========================================================================
+   КАСТОМНЫЙ СКРОЛЛ И ИСПРАВЛЕНИЕ ОБРЕЗКИ ДЛЯ ВЫПАДАЮЩЕГО СПИСКА
+   ========================================================================== */
+
+.address-picker-wrap .search-input+div {
+   
+    /* Тонкий скролл для Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+
+   
+}
+
+
+/* Кастомный скролл для Chrome / Edge / Yandex (Выпадающий список) */
+.address-picker-wrap .search-input+div::-webkit-scrollbar {
+    width: 6px;
+}
+
+.address-picker-wrap .search-input+div::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px 0;
+}
+
+.address-picker-wrap .search-input+div::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 10px;
+}
+
+.address-picker-wrap .search-input+div::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-secondary);
+}
+
+/* Кастомный скролл для Chrome / Edge / Yandex (Выпадающий список) */
+.address-picker-wrap .search-input+div::-webkit-scrollbar {
+    width: 6px;
+}
+
+.address-picker-wrap .search-input+div::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px 0;
+}
+
+.address-picker-wrap .search-input+div::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 10px;
+}
+
+.address-picker-wrap .search-input+div::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   КАСТОМНЫЙ СКРОЛЛ ДЛЯ ОСНОВНОЙ ТАБЛИЦЫ
+   ========================================================================== */
+
+.table-wrapper {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+}
+
+.table-wrapper::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    /* Для горизонтального скролла */
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 8px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-secondary);
+}
+
+/* Убираем белый квадрат в правом нижнем углу таблицы (где пересекаются скроллы) */
+.table-wrapper::-webkit-scrollbar-corner {
+    background: transparent;
+}
+/* Запрещаем скролл страницы, когда список адресов докручен до конца */
+.address-picker-wrap .search-input+div {
+    /* ... твои предыдущие стили (padding-bottom, max-height и т.д.) ... */
+
+    /* Магия против скролла страницы */
+    overscroll-behavior: contain;
+
+    /* Для надежности на мобильных устройствах (iOS/Android) */
+    overscroll-behavior-y: contain;
+}
+/* ==========================================================================
+   БРОНЕБОЙНЫЙ ФИКС КНОПОК В ФУТЕРЕ (Создание заявки)
+   ========================================================================== */
+
+.ticket-actions-footer {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    /* Разрешаем перенос на новую строку */
+    gap: 12px !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+}
+
+/* Жестко фиксируем размеры кнопок */
+.ticket-actions-footer #saveTicketBtn,
+.ticket-actions-footer #cancelFormBtn {
+    flex: 0 0 auto !important;
+    /* Запрещаем сжиматься */
+    height: 44px !important;
+    /* Фиксированная высота */
+    min-width: 150px !important;
+    /* Минимальная ширина */
+    padding: 0 24px !important;
+    /* Убираем вертикальные отступы, оставляем горизонтальные */
+    box-sizing: border-box !important;
+    margin: 0 !important;
+
+    /* Центрируем текст */
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    /* Запрещаем перенос текста на новую строку */
+    white-space: nowrap !important;
+    font-size: 14px !important;
+    line-height: 1 !important;
+    position: relative !important;
+}
+
+/* ==========================================================================
+   ФИКС СОСТОЯНИЙ КНОПКИ (Чтобы спиннер и галочки не ломали верстку)
+   ========================================================================== */
+
+/* Когда кнопка загружается или показывает успех/ошибку, скрываем текст */
+#saveTicketBtn.btn-loading,
+#saveTicketBtn.btn-success,
+#saveTicketBtn.btn-error {
+    color: transparent !important;
+}
+
+/* Иконки (спиннер, галочка, крестик) ставим ровно по центру */
+#saveTicketBtn.btn-loading::after,
+#saveTicketBtn.btn-success::after,
+#saveTicketBtn.btn-error::after {
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+}
