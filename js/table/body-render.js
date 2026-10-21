@@ -1,65 +1,143 @@
 import { tableSettings, getFreezeLeftOffset } from './settings.js';
+import { formatTs, nowTs } from '../utils/date-utils.js';
 
-/**
- * Заполняет тело таблицы (TBODY) данными из MySQL и фиксирует № и Адрес.
- *
- * Цветовая индикация: сервер отдаёт alert_level (1 | 2 | 3).
- * Фронт вешает класс row-level-N на <tr>, конкретный цвет приходит из
- * CSS-переменных активной темы (см. style.css). Sticky-ячейки «№» и «Адрес»
- * наследуют фон строки через переменную --row-bg — никаких inline !important.
- */
+// Выносим за пределы функции, чтобы не создавать объект при каждой итерации
+const NOTIFY_SUFFIXES = {
+    1: 'по телефону',
+    2: 'онлайн',
+    3: 'в телеграм',
+    4: 'в макс',
+    5: 'в вк',
+    6: 'по смс',
+    7: 'по email'
+};
+
 export function renderTableBody(tableElement, serverData) {
     const tbody = tableElement.querySelector('tbody') || tableElement.appendChild(document.createElement('tbody'));
     tbody.innerHTML = '';
 
-    const freezeLeftOffset = getFreezeLeftOffset(); // Рассчитываем сдвиг left
+    const freezeLeftOffset = getFreezeLeftOffset();
+    const currentTs = nowTs();
 
     serverData.forEach(rowData => {
         const tr = document.createElement('tr');
 
-        // Уровень визуальной тревоги от сервера.
-        // 1 — обычный (дефолт), 2 — внимание, 3 — критично.
-        // Любое невалидное значение трактуем как 1.
-        const rawLevel = Number(rowData.alert_level);
-        const alertLevel = (rawLevel >= 1 && rawLevel <= 3) ? rawLevel : 1;
+        // 1. Определяем проблемы для подсветки по контракту API 4.0
+        const isClosed = rowData.type === 'close';
+        const isOverdue = !isClosed && rowData.repair_time && Number(rowData.repair_time) < currentTs;
 
-        if (alertLevel > 1) {
-            tr.classList.add('row-level-' + alertLevel);
-        }
+        // Не назначен ответственный
+        const isUnassigned = !rowData.staff_id || rowData.staff_id === 0;
+
+        // Не уведомлен (если назначен, но статус 0/пустой ИЛИ нет даты уведомления)
+        const isUnnotified = !isUnassigned && (
+            rowData.notify_status === 0 ||
+            rowData.notify_status === '0' ||
+            rowData.notify_status == null ||
+            !rowData.notify_date
+        );
+
+        // Определяем приоритет для ячейки "№"
+        let idCellClass = '';
+        if (isOverdue) idCellClass = 'cell-alert-danger';
+        else if (isUnassigned) idCellClass = 'cell-alert-warning';
+        else if (isUnnotified) idCellClass = 'cell-alert-info';
 
         tableSettings.columns.forEach(col => {
+            // Пропускаем скрытые колонки
+            if (col.hidden || col.visible === false) return;
+
             const td = document.createElement('td');
             td.setAttribute('data-col-id', col.id);
 
-            // Применяем ширину из конфигурации
             const finalWidth = col.width || `${col.minWidth}px`;
             td.style.width = finalWidth;
             td.style.minWidth = `${col.minWidth}px`;
             td.style.maxWidth = finalWidth;
 
-            // Горизонтальная фиксация для Адреса в строках данных
             if (col.id === 'address') {
                 td.style.left = `${freezeLeftOffset}px`;
                 td.classList.add('sticky-freeze-border');
             }
 
-            // Получаем значение ячейки из пришедшего JSON-пакета
-            let cellValue = rowData[col.id] !== undefined ? rowData[col.id] : '';
+            // 2. Применяем классы подсветки (только для главного ответственного и №)
+            if (col.id === 'id' && idCellClass) {
+                td.classList.add(idCellClass);
+            }
+            if (col.id === 'repair_time' && isOverdue) {
+                td.classList.add('cell-alert-danger');
+            }
+            if (col.id === 'staff_name' && isUnassigned) {
+                td.classList.add('cell-alert-warning');
+            }
+            if (col.id === 'notify_status' && isUnnotified) {
+                td.classList.add('cell-alert-info');
+            }
 
-            // Защита от пустых дат и дефолтных штампов Unix 1970 года
-            if (col.dataType === 'date' && (cellValue === '' || String(cellValue).includes('1970'))) {
+            let cellValue = '';
+
+            // === ЛОГИКА ДЛЯ ОТВЕТСТВЕННЫХ ===
+            if (col.id === 'staff_name') {
+                cellValue = isUnassigned ? 'Не назначен' : (rowData.staff_name || '—');
+            } else if (col.id === 'staff_name2') {
+                cellValue = rowData.staff_name2 || '—';
+            } else if (col.id === 'staff_name3') {
+                cellValue = rowData.staff_name3 || '—';
+            }
+
+            // === ЛОГИКА ДЛЯ СТАТУСОВ УВЕДОМЛЕНИЯ ===
+            else if (col.id === 'notify_status') {
+                if (isUnassigned) {
+                    cellValue = '—';
+                } else if (isUnnotified) {
+                    cellValue = 'Не уведомлен';
+                } else {
+                    const suffix = NOTIFY_SUFFIXES[rowData.notify_status] || 'уведомлен';
+                    const dateStr = rowData.notify_date ? formatTs(rowData.notify_date) : '';
+                    cellValue = dateStr ? `${dateStr} - ${suffix}` : suffix;
+                }
+            }
+            else if (col.id === 'notify_status2') {
+                if (!rowData.staff_id2) {
+                    cellValue = '—';
+                } else {
+                    const suffix = NOTIFY_SUFFIXES[rowData.notify_status2] || 'уведомлен';
+                    const dateStr = rowData.notify_date2 ? formatTs(rowData.notify_date2) : '';
+                    cellValue = dateStr ? `${dateStr} - ${suffix}` : suffix;
+                }
+            }
+            else if (col.id === 'notify_status3') {
+                if (!rowData.staff_id3) {
+                    cellValue = '—';
+                } else {
+                    const suffix = NOTIFY_SUFFIXES[rowData.notify_status3] || 'уведомлен';
+                    const dateStr = rowData.notify_date3 ? formatTs(rowData.notify_date3) : '';
+                    cellValue = dateStr ? `${dateStr} - ${suffix}` : suffix;
+                }
+            }
+
+            // === СТАНДАРТНОЕ ФОРМАТИРОВАНИЕ ===
+            else {
+                cellValue = rowData[col.id] !== undefined ? rowData[col.id] : '';
+
+                if (col.dataType === 'date' && cellValue && cellValue !== '—') {
+                    cellValue = formatTs(cellValue);
+                }
+            }
+
+            // Защита от пустых дат
+            if (col.dataType === 'date' && (cellValue === '' || cellValue === '—' || cellValue === null)) {
                 cellValue = '—';
             }
 
-            // Прочерк для пустых полей solution/close_name/other
+            // Спец. тексты для пустых полей
             if (['solution', 'close_name', 'other'].includes(col.id) && String(cellValue).trim() === '') {
                 cellValue = '—';
             }
 
             td.textContent = cellValue;
 
-            // Навешиваем всплывающую подсказку (title) для длинных текстов
-            if (['solution', 'details', 'address', 'close_name'].includes(col.id) && cellValue !== '—') {
+            if (['solution', 'details', 'address', 'close_name', 'notify_status', 'notify_status2', 'notify_status3'].includes(col.id) && cellValue !== '—') {
                 td.setAttribute('title', cellValue);
             }
 

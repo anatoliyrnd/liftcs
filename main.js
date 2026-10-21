@@ -12,7 +12,7 @@ import { setRouter as setNotifyRouter } from "./js/components/notify.js";
 import { ThemeController } from "./js/theme-controller.js";
 import { MenuManager } from "./js/route/menu-manager.js";
 import { InactivityTracker } from "./js/route/inactivity-tracker.js";
-import { API, AUTH } from "./js/config.js"; // <--- Добавлен AUTH
+import { API, AUTH } from "./js/config.js";
 import { authStore } from "./js/auth-store.js";
 import { TicketsController } from "./js/tickets-controller.js";
 import { CreateController } from "./js/create-controller.js";
@@ -23,23 +23,25 @@ import { logHistoryAction } from "./js/history-logger.js";
 import { offlineDB } from "./js/offline-db.js";
 import { flattenAddresses } from "./js/utils/address-flattener.js";
 import { SyncManager } from "./js/sync-manager.js";
-import { SettingsController } from "./js/settings-controller.js"; // Новый импорт
+import { SettingsController } from "./js/settings-controller.js";
+
 const api = new ApiService(API.URL, { local: false });
 const router = new Router(() => authStore.hasAccess());
 
 let openTicketsArray = [];
 let closedTicketsArray = [];
-//instance
+
 const openTicketsCtrl = new TicketsController(api, router, "open");
 const closedTicketsCtrl = new TicketsController(api, router, "close");
 const createCtrl = new CreateController(api, router);
 const detailsCtrl = new DetailsController(api, router);
 const loginCtrl = new LoginController(api, router);
 const settingsCtrl = new SettingsController(api, router);
+
 let menuManager = null;
 let notifPoller = null;
 let inactivityTracker = null;
-let syncManager = null; // <--- ВЫНЕСЕНО В НАЧАЛО
+let syncManager = null;
 
 function syncAuthUI() {
   const historyWrapper = document.getElementById("historyWrapper");
@@ -56,9 +58,7 @@ function syncAuthUI() {
 
     if (navUserName) navUserName.textContent = user.name || "Пользователь";
     if (navUserAvatar) {
-      navUserAvatar.textContent = user.name
-        ? user.name.charAt(0).toUpperCase()
-        : "U";
+      navUserAvatar.textContent = user.name ? user.name.charAt(0).toUpperCase() : "U";
     }
 
     if (!notifPoller) {
@@ -98,13 +98,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (openTicketsCtrl) openTicketsCtrl._updateSyncButton();
   });
 
-  // 1. Обход авторизации или обычный вход
   if (AUTH.BYPASS_AUTH) {
     console.warn("⚠️ ВНИМАНИЕ: Авторизация отключена (BYPASS_AUTH = true)!");
     authStore.setSession("mock-token", Date.now() + 86400000, {
       id: 1,
       name: "Тестовый Доступ",
-      role: "guest", // Роль перезапишется из config, который придет с сервера
+      role: "guest",
     });
   } else {
     await api.tryAutoLogin();
@@ -120,23 +119,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (cities.length === 0) {
         console.log("[App] Адресов нет. Качаем с сервера...");
+        // Запрос данных (чтение) — используем ключ data
         const response = await api.post(
-          { data: "loadAddress" },
-          "Загрузка справочника адресов...",
-          "global",
+            { data: "loadAddress" },
+            "Загрузка справочника адресов...",
+            "global",
         );
 
         if (response && response.status === "ok") {
           const flatData = flattenAddresses(response);
           await offlineDB.saveAddresses(flatData);
-          console.log(
-            `[App] Успешно сохранено ${flatData.length} адресов в IndexedDB.`,
-          );
+          console.log(`[App] Успешно сохранено ${flatData.length} адресов в IndexedDB.`);
         }
       } else {
-        console.log(
-          "[App] Адреса уже есть в базе (городов: " + cities.length + ").",
-        );
+        console.log("[App] Адреса уже есть в базе (городов: " + cities.length + ").");
       }
     } catch (err) {
       console.error("[App] Ошибка при загрузке адресов:", err);
@@ -145,7 +141,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   syncAuthUI();
 
-  // Меню профиля
   const userProfileBtn = document.getElementById("userProfileBtn");
   const userDropdown = document.getElementById("userDropdown");
   const userProfileWrapper = document.getElementById("userProfileWrapper");
@@ -171,7 +166,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Кнопка выхода
   const logoutBtn = document.getElementById("logoutBtn");
   if (logoutBtn) {
     logoutBtn.onclick = async () => {
@@ -187,7 +181,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const navLogo = document.getElementById("navLogo");
   if (navLogo) navLogo.addEventListener("click", () => router.navigate("#/"));
 
-  // 2. Слушатель потери сессии (отключаем в тестовом режиме)
   if (!AUTH.BYPASS_AUTH) {
     window.addEventListener(ApiService.AUTH_LOST_EVENT, (e) => {
       authStore.clear();
@@ -202,51 +195,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Роуты
-  router.addRoute(
-    "#/login",
-    () => loginPageTemplate(),
-    () => loginCtrl.mount(),
-  );
-  router.addRoute(
-    "#/",
-    () => mainPageTemplate(),
-    () => {
-      closedTicketsCtrl.unmount();
-      openTicketsCtrl.mount(openTicketsArray);
-    },
-  );
-  router.addRoute(
-    "#/closed",
-    () => mainPageTemplate(),
-    () => {
-      openTicketsCtrl.unmount();
-      closedTicketsCtrl.mount(closedTicketsArray);
-    },
-  );
-  router.addRoute(
-    "#/create",
-    () => createPageTemplate(),
-    () => {
-      openTicketsCtrl.unmount();
-      createCtrl.unmount();
-      createCtrl.mount(openTicketsArray);
-    },
-  );
-  router.addRoute(
-    "#/ticket",
-    (ticketId) => detailsPageTemplate(ticketId),
-    (ticketId) => {
-      openTicketsCtrl.unmount();
-      const allTicketsCombined = [...openTicketsArray, ...closedTicketsArray];
-      detailsCtrl.mount(ticketId, allTicketsCombined);
-    },
-  );
-  router.addRoute(
-    "#/settings",
-    () => settingsPageTemplate(),
-    () => settingsCtrl.mount(),
-  );
+  router.addRoute("#/login", () => loginPageTemplate(), () => loginCtrl.mount());
+  router.addRoute("#/", () => mainPageTemplate(), () => {
+    closedTicketsCtrl.unmount();
+    openTicketsCtrl.mount(openTicketsArray);
+  });
+  router.addRoute("#/closed", () => mainPageTemplate(), () => {
+    openTicketsCtrl.unmount();
+    closedTicketsCtrl.mount(closedTicketsArray);
+  });
+  router.addRoute("#/create", () => createPageTemplate(), () => {
+    openTicketsCtrl.unmount();
+    createCtrl.unmount();
+    createCtrl.mount(openTicketsArray);
+  });
+  router.addRoute("#/ticket", (ticketId) => detailsPageTemplate(ticketId), (ticketId) => {
+    openTicketsCtrl.unmount();
+    const allTicketsCombined = [...openTicketsArray, ...closedTicketsArray];
+    detailsCtrl.mount(ticketId, allTicketsCombined);
+  });
+  router.addRoute("#/settings", () => settingsPageTemplate(), () => settingsCtrl.mount());
+
   window.addEventListener("hashchange", () => {
     const hash = window.location.hash || "#/";
     if (hash === "#/login" || hash === "#/") {
@@ -256,21 +225,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   const createPlaceholderRoute = (title) => () =>
-    `<div class="container"><h1>${title}</h1><p style="color:var(--text-secondary); margin-top:10px;">Экран находится в разработке автономного режима.</p></div>`;
+      `<div class="container"><h1>${title}</h1><p style="color:var(--text-secondary); margin-top:10px;">Экран находится в разработке автономного режима.</p></div>`;
   router.addRoute("#/reports", createPlaceholderRoute("Аналитические Отчеты"));
-  router.addRoute(
-    "#/addresses",
-    createPlaceholderRoute("Реестр лифтовых адресов"),
-  );
-  router.addRoute(
-    "#/more",
-    createPlaceholderRoute("Прочие инструменты диспетчера"),
-  );
-  router.addRoute("#/profile", createPlaceholderRoute("Личный кабинет"));
+  router.addRoute("#/addresses", createPlaceholderRoute("Реестр лифтовых адресов"));
+  router.addRoute("#/more", createPlaceholderRoute("Прочие инструменты диспетчера"));
+  router.addRoute("#/profile", () => settingsPageTemplate(), () => settingsCtrl.mount());
 
-  // 3. Инициализация SyncManager (без const!)
-  // === УПРАВЛЕНИЕ СВОРАЧИВАНИЕМ БЛОКА "ИСТОРИЯ" ===
-  // (Вынесено из SyncManager, чтобы работать сразу при загрузке)
   const historyWrapper = document.getElementById("historyWrapper");
   const historyTitle = document.getElementById("historyTitle");
 
@@ -281,7 +241,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
   }
 
-  // 3. Инициализация SyncManager
   syncManager = new SyncManager(api, router, (newTickets) => {
     openTicketsArray.length = 0;
     openTicketsArray.push(...newTickets);
@@ -289,32 +248,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (window.location.hash === "#/" || window.location.hash === "") {
       openTicketsCtrl.refreshFromMemory(openTicketsArray);
     }
-  }); // <-- Убрана опечатка };)
+  });
 
-  // Делаем инстанс доступным для контроллера таблицы
   window.syncManagerInstance = syncManager;
 
   if (navigator.onLine) {
     setTimeout(() => syncManager.startSync(), 1000);
   }
 
-  // 5. Регистрация Service Worker для PWA
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker
-        .register("./sw.js")
-        .then((registration) => {
-          console.log(
-            "✅ Service Worker зарегистрирован. Область:",
-            registration.scope,
-          );
-        })
-        .catch((error) => {
-          console.error("❌ Ошибка регистрации Service Worker:", error);
-        });
+          .register("./sw.js")
+          .then((registration) => {
+            console.log("✅ Service Worker зарегистрирован. Область:", registration.scope);
+          })
+          .catch((error) => {
+            console.error("❌ Ошибка регистрации Service Worker:", error);
+          });
     });
   }
 
-  // 4. Ручной старт роутера
   router._handleRoute();
 });

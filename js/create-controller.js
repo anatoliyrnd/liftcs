@@ -8,12 +8,13 @@ import {
 } from "./components/voiceInput.js";
 import { notify } from "./components/notify.js";
 import { logHistoryAction } from "./history-logger.js";
-import { VALIDATION, UI } from "./config.js";
+import { VALIDATION, UI, OFFLINE } from "./config.js";
 import { appState } from "./app-state.js";
 import { createAddressPicker } from "./components/address-picker.js";
 import { offlineDB } from "./offline-db.js";
-import { OFFLINE } from "./config.js";
 import { authStore } from "./auth-store.js";
+import { nowTs } from "./utils/date-utils.js";
+
 export class CreateController {
   constructor(apiInstance, routerInstance) {
     this.api = apiInstance;
@@ -30,30 +31,27 @@ export class CreateController {
   }
 
   mount(globalTicketsArrayRef) {
-    // Проверяем, пришли ли мы из карточки после закрытия с галочкой «создать новую»
     this.prefilledAddress = null;
     if (appState.pendingCreateAddress) {
       this.prefilledAddress = appState.pendingCreateAddress;
-      appState.pendingCreateAddress = null; // одноразовый
-      //если перешли из закрытой заявки, старый черновик не нужен
+      appState.pendingCreateAddress = null;
       sessionStorage.removeItem("create_draft");
-      // Обновляем заголовок страницы
       const h1 =
-        document.querySelector(".create-form-wrapper h1") ||
-        document.querySelector("h1");
+          document.querySelector(".create-form-wrapper h1") ||
+          document.querySelector("h1");
       if (h1 && this.prefilledAddress.from_ticket_id) {
         h1.textContent =
-          "Новая заявка для объекта из заявки №" +
-          this.prefilledAddress.from_ticket_id;
+            "Новая заявка для объекта из заявки №" +
+            this.prefilledAddress.from_ticket_id;
       }
     }
-    // === Инициализация AddressPicker ===
+
     const addressSlot = document.getElementById("formAddressSlot");
     if (addressSlot && !this.addressPicker) {
-      const isPrefilled = !!this.prefilledAddress; // Есть ли наследованный адрес?
+      const isPrefilled = !!this.prefilledAddress;
 
       this.addressPicker = createAddressPicker({
-        readOnly: isPrefilled, // <--- Передаем флаг
+        readOnly: isPrefilled,
         onChange: (data) => {
           this._updateSaveBtnState();
         },
@@ -61,21 +59,19 @@ export class CreateController {
       addressSlot.innerHTML = "";
       addressSlot.appendChild(this.addressPicker.element);
 
-      // Если есть предзаполненный адрес (из закрытой заявки) — подставляем его!
       if (isPrefilled) {
         this.addressPicker.setValue(this.prefilledAddress);
-
-        // Показываем подсказку под полем
         const addrHint = document.getElementById("formAddressHint");
         if (addrHint && this.prefilledAddress.from_ticket_id) {
           addrHint.textContent =
-            "📍 Адрес из заявки №" +
-            this.prefilledAddress.from_ticket_id +
-            " — объект наследуется автоматически";
+              "📍 Адрес из заявки №" +
+              this.prefilledAddress.from_ticket_id +
+              " — объект наследуется автоматически";
           addrHint.style.display = "block";
         }
       }
     }
+
     const formContainer = document.querySelector(".create-form-wrapper");
     if (formContainer) {
       formContainer.onkeydown = (e) => {
@@ -84,13 +80,12 @@ export class CreateController {
           if (saveBtn && !saveBtn.disabled) saveBtn.click();
         }
       };
-      // Слушаем изменения для автосохранения
       formContainer.oninput = () => {
         clearTimeout(this._draftTimer);
         this._draftTimer = setTimeout(() => this._saveDraft(), 1000);
       };
     }
-    // Компонент выбора механика с поиском
+
     const staffSlot = document.getElementById("formStaffSlot");
     if (staffSlot && !this.staffSelect) {
       this.staffSelect = createStaffSelect({
@@ -101,20 +96,18 @@ export class CreateController {
       staffSlot.appendChild(this.staffSelect.element);
     }
 
-    // Компонент «Предполагаемое окончание ремонта» — создаём один раз за mount
     const repairSlot = document.getElementById("repairTimeSlot");
     if (repairSlot && !this.repairPicker) {
       this.repairPicker = createRepairTimePicker({
-        initialValue: null,
+        initialValue: null, // Возьмет дефолт (17:00 сегодня/завтра) из date-utils.js
         onChange: () => {
-          /* зарезервировано под валидацию */
+          this._updateSaveBtnState();
         },
       });
       repairSlot.innerHTML = "";
       repairSlot.appendChild(this.repairPicker.element);
     }
 
-    // Справочники отдел / запрос / группа
     const slots = [
       {
         id: "createDeptSlot",
@@ -150,18 +143,19 @@ export class CreateController {
         this[s.ref] = comp;
       }
     });
+
     this._checkDraft();
     this._updateSaveBtnState();
-    // Голосовой ввод для textarea описания
+
     const formDetails = document.getElementById("formDetails");
     const formDetailsRow = document.getElementById("formDetailsRow");
     if (formDetails) {
       initVoiceTextarea(
-        formDetails,
-        formDetailsRow ? { container: formDetailsRow } : {},
+          formDetails,
+          formDetailsRow ? { container: formDetailsRow } : {},
       );
     }
-    // Валидация капса на описании
+
     if (formDetails) {
       const capsWarn = document.getElementById("capsWarnFormDetails");
       formDetails.oninput = () => {
@@ -170,45 +164,41 @@ export class CreateController {
         this._updateSaveBtnState();
       };
     }
-    // Кнопка «Отмена»
+
     const cancelBtn = document.getElementById("cancelFormBtn");
     if (cancelBtn) {
       cancelBtn.onclick = () => this.router.navigate("#/");
     }
 
-    // Кнопка «Сохранить заявку»
     const saveBtn = document.getElementById("saveTicketBtn");
     if (saveBtn) {
       saveBtn.onclick = async () => {
-        // 1. Получаем данные из нового компонента адреса
         const addressData = this.addressPicker
-          ? this.addressPicker.getValue()
-          : null;
+            ? this.addressPicker.getValue()
+            : null;
         const details = document.getElementById("formDetails").value.trim();
         const staffId = this.staffSelect ? this.staffSelect.getValue() : null;
 
-        // 2. Проверяем обязательные поля
         if (!addressData || !details) {
           const msg =
-            "Заполните обязательные поля: выберите адрес и введите описание проблемы.";
+              "Заполните обязательные поля: выберите адрес и введите описание проблемы.";
           notify.error(msg);
           logHistoryAction(msg);
           return;
         }
 
-        // 3. Проверяем дату ремонта и справочники
         if (this.repairPicker && !this.repairPicker.isValid()) {
           const msg =
-            "Дата ремонта указана некорректно: должна быть не менее чем через 30 минут от текущего момента.";
+              "Дата ремонта указана некорректно: должна быть не менее чем через 25 минут от текущего момента.";
           notify.error(msg);
           logHistoryAction(msg);
           return;
         }
 
         if (
-          !this.deptSelect?.isValid() ||
-          !this.reqSelect?.isValid() ||
-          !this.groupSelect?.isValid()
+            !this.deptSelect?.isValid() ||
+            !this.reqSelect?.isValid() ||
+            !this.groupSelect?.isValid()
         ) {
           const msg = "Пожалуйста, выберите отдел, тип запроса и группу.";
           notify.error(msg);
@@ -216,78 +206,64 @@ export class CreateController {
           return;
         }
 
-        const staffObj = staffStore.getById(staffId);
+        // Собираем чистый payload (без action) для онлайн и офлайн режимов
+        const newTicketPayload = this._buildCallnewPayload(
+            addressData,
+            details,
+            staffId
+        );
 
-        // 4. Формируем объект заявки с ID из addressData
-        const newTicket = {
-          // Вместо старого address используем addressData.address
-          address: addressData.address,
-          city_id: addressData.city_id,
-          street_id: addressData.street_id,
-          home_id: addressData.home_id,
-          object_id: addressData.object_id,
-
-          details: details,
-          department_id: this.deptSelect?.getValue() || null,
-          request_id: this.reqSelect?.getValue() || null,
-          group_id: this.groupSelect?.getValue() || null,
-          staff_id: staffId || null,
-          staff: staffObj ? staffObj.name : "Не назначен",
-          staff_date:
-            new Date().toLocaleDateString() + " - создана диспетчером",
-          department: "1.Электромеханики",
-          date: new Date().toLocaleString("ru"),
-          repair_time: this.repairPicker ? this.repairPicker.getValue() : null,
-          close_date: "—",
-          solution: "",
-          full_history:
-            "Дата изменений: " +
-            new Date().toLocaleString() +
-            " - создана диспетчером локально.",
-        };
-
-        // Блокируем форму
         this._lockForm();
         this._setSaveBtnState("loading");
 
-        // Дальше идет проверка navigator.onLine и try/catch, которые мы добавляли в прошлом шаге...
-        // ПРОВЕРКА: Если браузер знает, что сети нет
         if (!navigator.onLine) {
-          await this._saveOffline(newTicket, globalTicketsArrayRef);
+          await this._saveOffline(newTicketPayload, globalTicketsArrayRef);
           return;
         }
 
         try {
+          // ДОБАВЛЯЕМ action: 'callnew' К PAYLOAD
           const response = await this.api.post(
-            newTicket,
-            "Запись инцидента...",
+              { action: "callnew", ...newTicketPayload },
+              "Запись инцидента...",
           );
 
-          // Если сервер ответил ошибкой СЕТИ (fetch упал)
           if (response && response.code === "network_error") {
-            await this._saveOffline(newTicket, globalTicketsArrayRef);
+            await this._saveOffline(newTicketPayload, globalTicketsArrayRef);
             return;
           }
 
-          // Успешное сохранение онлайн
           if (response && response.status === "ok") {
-            this._clearDraft(); // Очищаем черновик после успешного создания
+            this._clearDraft();
             this._setSaveBtnState("success");
             const msg = response.message || "Заявка зарегистрирована.";
             logHistoryAction(msg);
             notify.success(msg);
 
-            // Добавляем в массив (временно с локальным ID)
-            globalTicketsArrayRef.unshift(newTicket);
+            // ВАРИАНТ B: Запрашиваем свежий список открытых заявок
+            try {
+              const freshOpen = await this.api.post(
+                  { data: "open" },
+                  null, // silent, без статус-бара
+                  "global"
+              );
+              if (Array.isArray(freshOpen)) {
+                globalTicketsArrayRef.length = 0;
+                globalTicketsArrayRef.push(...freshOpen);
+              }
+            } catch (e) {
+              console.warn("[CreateController] Не удалось обновить список open", e);
+              // Даже если не удалось обновить, заявка на сервере создана.
+              // Просто перекидываем пользователя.
+            }
 
             if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
             this.autoReturnTimer = setTimeout(() => {
               this.router.navigate("#/");
             }, UI.AUTO_RETURN_MS);
           } else {
-            // Логическая ошибка сервера (не сеть)
             const msg =
-              (response && response.message) || "Не удалось создать заявку.";
+                (response && response.message) || "Не удалось создать заявку.";
             this._setSaveBtnState("error");
             logHistoryAction(msg);
             notify.error(msg);
@@ -299,13 +275,33 @@ export class CreateController {
             }, UI.ERROR_UNLOCK_MS);
           }
         } catch (err) {
-          // Любая другая ошибка (таймаут и т.д.)
           console.error("[CreateController] Save error:", err);
-          await this._saveOffline(newTicket, globalTicketsArrayRef);
+          await this._saveOffline(newTicketPayload, globalTicketsArrayRef);
         }
       };
     }
   }
+
+  /**
+   * Формирует объект заявки в строгом соответствии с API_PROTOCOL.md v4.0
+   * (Без action, без staff_date, без старых полей)
+   */
+  _buildCallnewPayload(addressData, details, staffId) {
+    return {
+      city_id: addressData.city_id,
+      street_id: addressData.street_id,
+      home_id: addressData.home_id,
+      object_id: addressData.object_id,
+      fullAddress: addressData.address, // Маппинг из address-picker
+      group_id: this.groupSelect?.getValue() || null,
+      request_id: this.reqSelect?.getValue() || null,
+      department_id: this.deptSelect?.getValue() || null,
+      repair_time: this.repairPicker ? this.repairPicker.getTimestamp() : null,
+      details: details,
+      staff_id: staffId || null,
+    };
+  }
+
   _saveDraft() {
     const details = document.getElementById("formDetails")?.value || "";
     const address = this.addressPicker?.getValue();
@@ -313,9 +309,9 @@ export class CreateController {
     const dept = this.deptSelect?.getValue();
     const req = this.reqSelect?.getValue();
     const grp = this.groupSelect?.getValue();
-    const repair = this.repairPicker?.getValue();
+    const repair = this.repairPicker?.getTimestamp();
 
-    if (!details && !address) return; // Не сохраняем пустоту
+    if (!details && !address) return;
 
     const draft = { details, address, staffId, dept, req, grp, repair };
     sessionStorage.setItem("create_draft", JSON.stringify(draft));
@@ -331,26 +327,31 @@ export class CreateController {
     try {
       const draft = JSON.parse(raw);
       if (
-        confirm("Найден несохраненный черновик заявки. Восстановить данные?")
+          confirm("Найден несохраненный черновик заявки. Восстановить данные?")
       ) {
         if (draft.details)
           document.getElementById("formDetails").value = draft.details;
+
         if (draft.address && this.addressPicker)
           this.addressPicker.setValue(draft.address);
 
-        // Пытаемся восстановить селекты
-        if (draft.dept && this.deptSelect && this.deptSelect.setValue)
+        if (draft.dept && this.deptSelect)
           this.deptSelect.setValue(draft.dept);
-        if (draft.req && this.reqSelect && this.reqSelect.setValue)
+
+        if (draft.req && this.reqSelect)
           this.reqSelect.setValue(draft.req);
-        if (draft.grp && this.groupSelect && this.groupSelect.setValue)
+
+        if (draft.grp && this.groupSelect)
           this.groupSelect.setValue(draft.grp);
-        if (draft.staffId && this.staffSelect && this.staffSelect.setValue)
+
+        if (draft.staffId && this.staffSelect)
           this.staffSelect.setValue(draft.staffId);
-        if (draft.repair && this.repairPicker && this.repairPicker.setValue)
+
+        if (draft.repair && this.repairPicker)
           this.repairPicker.setValue(draft.repair);
 
-        this._updateSaveBtnState();
+        // Вызов this._updateSaveBtnState() удален,
+        // так как методы setValue() сами триггерят onChange.
       } else {
         this._clearDraft();
       }
@@ -358,29 +359,19 @@ export class CreateController {
       console.error("[CreateController] Draft restore error:", e);
     }
   }
-  /**
-   * Блокирует форму создания. Все клики запрещены,
-   * кроме кнопки «Отмена» (вернуться в журнал).
-   */
+
   _lockForm() {
     this.isLocked = true;
     const wrapper = document.querySelector(".create-form-wrapper");
     if (wrapper) wrapper.classList.add("create-form-locked");
   }
 
-  /**
-   * Снимает блокировку формы.
-   */
   _unlockForm() {
     this.isLocked = false;
     const wrapper = document.querySelector(".create-form-wrapper");
     if (wrapper) wrapper.classList.remove("create-form-locked");
   }
 
-  /**
-   * Управляет состоянием кнопки «Сохранить заявку»:
-   * idle (по умолчанию) | loading | success | error.
-   */
   _setSaveBtnState(state) {
     const btn = document.getElementById("saveTicketBtn");
     if (!btn) return;
@@ -404,29 +395,27 @@ export class CreateController {
       this._updateSaveBtnState();
     }
   }
-  /**
-   * Обновляет состояние кнопки «Сохранить заявку».
-   * Активна только когда все три обязательных селекта заполнены.
-   */
+
   _updateSaveBtnState() {
     const btn = document.getElementById("saveTicketBtn");
     if (!btn || this.isLocked) return;
 
     const formDetails = document.getElementById("formDetails");
     const hasCaps =
-      formDetails && VALIDATION.CAPS_REGEX.test(formDetails.value);
+        formDetails && VALIDATION.CAPS_REGEX.test(formDetails.value);
 
     const allFilled =
-      this.addressPicker?.isValid() &&
-      this.deptSelect?.isValid() &&
-      this.reqSelect?.isValid() &&
-      this.groupSelect?.isValid() &&
-      !hasCaps;
+        this.addressPicker?.isValid() &&
+        this.deptSelect?.isValid() &&
+        this.reqSelect?.isValid() &&
+        this.groupSelect?.isValid() &&
+        !hasCaps;
 
     btn.disabled = !allFilled;
     btn.style.opacity = allFilled ? "1" : "0.5";
     btn.style.cursor = allFilled ? "pointer" : "not-allowed";
   }
+
   async _saveOffline(ticketPayload, globalTicketsArrayRef) {
     try {
       const count = await offlineDB.getOutboxCount();
@@ -444,30 +433,34 @@ export class CreateController {
 
       const user = authStore.getUser();
       const uuid =
-        "offline_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+          "offline_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
 
       const offlineTicket = {
         uuid: uuid,
-        original_author_id: user ? user.id : 0,
-        original_author_name: user ? user.name : "Неизвестный",
-        payload: ticketPayload,
-        created_at: Date.now(),
+        offline_uuid: uuid,
+        offline_author_id: user ? user.id : 0,
+        offline_author_name: user ? user.name : "Неизвестный",
+        payload: ticketPayload, // чистый payload без action
+        created_at: nowTs(),
       };
+
+
 
       await offlineDB.addToOutbox(offlineTicket);
 
       this._setSaveBtnState("success");
       const msg =
-        "Заявка сохранена локально (нет сети). Синхронизация при восстановлении связи.";
+          "Заявка сохранена локально (нет сети). Синхронизация при восстановлении связи.";
       notify.info(msg);
       logHistoryAction(msg);
 
-      // Добавляем локальную заявку в массив (чтобы она сразу появилась в журнале)
+      // Временно добавляем в память для отображения в журнале
       globalTicketsArrayRef.unshift({
         ...ticketPayload,
         id: uuid,
         type: "open",
-        date: new Date().toLocaleString("ru"),
+        address: ticketPayload.fullAddress, // маппинг для таблицы
+        date: new Date().toLocaleString("ru"), // временная дата для UI
         isOffline: true,
       });
 
@@ -486,23 +479,16 @@ export class CreateController {
     }
   }
 
-  /**
-   * Вызывается роутером при уходе с #/create.
-   * Уничтожает все компоненты и освобождает ссылки.
-   */
   unmount() {
     destroyVoiceInput();
     this._unlockForm();
     this.prefilledAddress = null;
-    // Отменяем активный запрос сохранения заявки
     this.api.abortTag("create");
     if (this.autoReturnTimer) {
       clearTimeout(this.autoReturnTimer);
       this.autoReturnTimer = null;
     }
-    //if (this.addressPicker && typeof this.addressPicker.destroy === 'function') {
-    //  this.addressPicker.destroy();
-    //  }
+
     [
       "staffSelect",
       "repairPicker",
@@ -513,7 +499,7 @@ export class CreateController {
     ].forEach((name) => {
       const comp = this[name];
       if (comp && typeof comp.destroy === "function") comp.destroy();
-      this[name] = null; // <--- ВАЖНО: здесь очищается ссылка на объект
+      this[name] = null;
     });
   }
 }

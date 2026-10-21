@@ -2136,3 +2136,18 @@ table[data-mode="open"] td[data-col-id="close_date"] {
     transform: translate(-50%, -50%) !important;
     margin: 0 !important;
 }
+td.cell-alert-danger {
+    background-color: rgba(239, 68, 68, 0.15) !important;
+    color: #ef4444 !important;
+    font-weight: 700;
+}
+td.cell-alert-warning {
+    background-color: rgba(245, 158, 11, 0.15) !important;
+    color: #d97706 !important;
+    font-weight: 600;
+}
+td.cell-alert-info {
+    background-color: rgba(234, 179, 8, 0.15) !important;
+    color: #ca8a04 !important;
+    font-weight: 600;
+}

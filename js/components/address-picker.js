@@ -13,13 +13,13 @@ export function createAddressPicker(opts = {}) {
   const wrap = document.createElement("div");
   wrap.className = "address-picker-wrap";
   wrap.style.cssText =
-    "display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1001;";
+      "display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1001;";
 
   const cityWrap = document.createElement("div");
   const cityLabel = document.createElement("label");
   cityLabel.textContent = "Город";
   cityLabel.style.cssText =
-    "font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;";
+      "font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;";
 
   const citySelect = document.createElement("select");
   citySelect.className = "search-input";
@@ -33,9 +33,9 @@ export function createAddressPicker(opts = {}) {
 
   const searchLabel = document.createElement("label");
   searchLabel.textContent =
-    mode === "house" ? "Поиск дома / лифта" : "Поиск адреса (Улица, дом, лифт)";
+      mode === "house" ? "Поиск дома / лифта" : "Поиск адреса (Улица, дом, лифт)";
   searchLabel.style.cssText =
-    "font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;";
+      "font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;";
 
   const searchInput = document.createElement("input");
   searchInput.type = "text";
@@ -43,38 +43,38 @@ export function createAddressPicker(opts = {}) {
   searchInput.placeholder = "Например: Ленина 5";
   searchInput.style.marginTop = "4px";
   searchInput.autocomplete = "off";
+
   if (readOnly) {
-    // Блокируем селект города
     citySelect.disabled = true;
     citySelect.style.pointerEvents = "none";
     citySelect.style.backgroundColor = "var(--table-row-hover)";
     citySelect.style.cursor = "not-allowed";
 
-    // Блокируем поле поиска
     searchInput.readOnly = true;
     searchInput.style.pointerEvents = "none";
     searchInput.style.backgroundColor = "var(--table-row-hover)";
     searchInput.style.cursor = "not-allowed";
-
-    // Убираем свечение (так как поле нередактируемое)
     searchInput.classList.remove("editable-field");
   }
-  const dropdown = document.createElement("div");
-  // Создаем подложку для затемнения (один раз при инициализации)
-  let backdrop = document.getElementById("addressPickerBackdrop");
-  if (!backdrop) {
-    backdrop = document.createElement("div");
-    backdrop.id = "addressPickerBackdrop";
-    backdrop.className = "filter-backdrop";
-    document.body.appendChild(backdrop);
 
-    backdrop.onclick = () => {
-      hideDropdown();
-      searchInput.blur(); // Убираем фокус с поля
-    };
-  }
+  const dropdown = document.createElement("div");
+
+  // === ДИНАМИЧЕСКАЯ ПОДЛОЖКА (без конфликта ID) ===
+  const backdrop = document.createElement("div");
+  backdrop.className = "filter-backdrop";
+  backdrop.style.display = "none";
+  document.body.appendChild(backdrop);
+
+  const onBackdropClick = (e) => {
+    e.stopPropagation(); // Защита от двойного срабатывания с document
+    hideDropdown();
+    searchInput.blur();
+  };
+  backdrop.addEventListener("click", onBackdropClick);
+
   dropdown.style.cssText =
-    "display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 1000; max-height: 350px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 4px; padding-bottom: 8px;";
+      "display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 1000; max-height: 350px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 4px; padding-bottom: 8px;";
+
   searchWrap.appendChild(searchLabel);
   searchWrap.appendChild(searchInput);
   searchWrap.appendChild(dropdown);
@@ -85,39 +85,19 @@ export function createAddressPicker(opts = {}) {
   let selectedData = initialValue;
   let currentCities = [];
   let pendingCityId = null;
-  // Для управления клавиатурой
   let focusableElements = [];
   let activeIndex = -1;
 
   function normalize(text) {
     let t = text
-      .toLowerCase()
-      .replace(/[^\wа-яё\s]/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+        .toLowerCase()
+        .replace(/[^\wа-яё\s]/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     const stopWords = [
-      "ул",
-      "улица",
-      "пр",
-      "проспект",
-      "пр-т",
-      "пер",
-      "переулок",
-      "ш",
-      "шоссе",
-      "б-р",
-      "бульвар",
-      "пл",
-      "площадь",
-      "д",
-      "дом",
-      "п",
-      "под",
-      "подъезд",
-      "лифт",
-      "п.",
-      "авеню",
-      "аллея",
+      "ул", "улица", "пр", "проспект", "пр-т", "пер", "переулок",
+      "ш", "шоссе", "б-р", "бульвар", "пл", "площадь",
+      "д", "дом", "п", "под", "подъезд", "лифт", "п.", "авеню", "аллея",
     ];
     stopWords.forEach((w) => {
       t = t.replace(new RegExp(`\\b${w}\\b`, "g"), "");
@@ -131,7 +111,6 @@ export function createAddressPicker(opts = {}) {
     const tokens = query.split(" ").filter((t) => t.length > 0);
 
     tokens.forEach((token) => {
-      // Ищем каждое слово из запроса отдельно
       const regex = new RegExp(`(${escapeHtml(token)})`, "gi");
       safeText = safeText.replace(regex, "<b>$1</b>");
     });
@@ -144,8 +123,8 @@ export function createAddressPicker(opts = {}) {
       const raw = localStorage.getItem("recent_addresses");
       const all = raw ? JSON.parse(raw) : [];
       return all
-        .filter((a) => a.city_id === Number(cityId))
-        .slice(0, UI.RECENT_ADDRESSES_LIMIT);
+          .filter((a) => a.city_id === Number(cityId))
+          .slice(0, UI.RECENT_ADDRESSES_LIMIT);
     } catch (e) {
       return [];
     }
@@ -156,26 +135,22 @@ export function createAddressPicker(opts = {}) {
     citySelect.innerHTML = '<option value="">— Выберите город —</option>';
     currentCities.forEach((c) => {
       const opt = document.createElement("option");
-      opt.value = String(c.id); // Принудительно делаем строкой для надежности
+      opt.value = String(c.id);
       opt.textContent = c.name;
       citySelect.appendChild(opt);
     });
 
-    // 1. СНАЧАЛА проверяем отложенный город (из черновика)
     if (pendingCityId) {
       citySelect.value = String(pendingCityId);
       pendingCityId = null;
-      // Если это не readOnly (т.е. мы восстанавливаем черновик),
-      // просто показываем поле поиска, но НЕ сбрасываем текст!
       if (!readOnly) {
         searchWrap.style.display = "block";
       }
     } else {
-      // 2. Если черновика нет, только тогда применяем город по умолчанию
       const defaultCity = await offlineDB.getConfig("default_city_id");
       if (
-        defaultCity &&
-        currentCities.some((c) => String(c.id) === String(defaultCity))
+          defaultCity &&
+          currentCities.some((c) => String(c.id) === String(defaultCity))
       ) {
         citySelect.value = String(defaultCity);
         if (!readOnly) handleCityChange();
@@ -191,8 +166,6 @@ export function createAddressPicker(opts = {}) {
       onChange(null);
       return;
     }
-
-    // Если режим только для чтения — прерываем выполнение
     if (readOnly) return;
 
     searchWrap.style.display = "block";
@@ -204,6 +177,7 @@ export function createAddressPicker(opts = {}) {
   }
 
   citySelect.onchange = handleCityChange;
+
   function showDropdown() {
     dropdown.style.display = "block";
     backdrop.style.display = "block";
@@ -216,21 +190,18 @@ export function createAddressPicker(opts = {}) {
     const spaceBelow = windowHeight - rect.bottom - padding;
     const spaceAbove = rect.top - padding;
 
-    // position: fixed — выходит из-под клиппинга #app и body
     dropdown.style.position = "fixed";
     dropdown.style.left = rect.left + "px";
     dropdown.style.width = rect.width + "px";
     dropdown.style.right = "auto";
 
     if (spaceBelow < minSpace && spaceAbove > spaceBelow) {
-      // Открываем вверх
       dropdown.style.top = "auto";
       dropdown.style.bottom = windowHeight - rect.top + 5 + "px";
       dropdown.style.marginTop = "0";
       dropdown.style.marginBottom = "0";
       dropdown.style.maxHeight = Math.min(spaceAbove, 350) + "px";
     } else {
-      // Открываем вниз
       dropdown.style.top = rect.bottom + 5 + "px";
       dropdown.style.bottom = "auto";
       dropdown.style.marginTop = "0";
@@ -238,21 +209,27 @@ export function createAddressPicker(opts = {}) {
       dropdown.style.maxHeight = Math.min(spaceBelow, 350) + "px";
     }
   }
+
   function hideDropdown() {
     dropdown.style.display = "none";
     backdrop.style.display = "none";
   }
 
-  // dropdown теперь fixed — его координаты устаревают при скролле/ресайзе
-  window.addEventListener("resize", hideDropdown);
-  window.addEventListener(
-    "scroll",
-    (e) => {
-      if (!dropdown.contains(e.target)) hideDropdown();
-    },
-    true,
-  );
-  // --- ГРУППИРОВКА И РЕНДЕР ---
+  // === СОХРАНЯЕМ ССЫЛКИ НА СЛУШАТЕЛИ ===
+  const onWindowResize = () => hideDropdown();
+
+  const onWindowScroll = (e) => {
+    if (!dropdown.contains(e.target)) hideDropdown();
+  };
+
+  const onDocClick = (e) => {
+    if (!searchWrap.contains(e.target)) hideDropdown();
+  };
+
+  window.addEventListener("resize", onWindowResize);
+  window.addEventListener("scroll", onWindowScroll, true);
+  document.addEventListener("click", onDocClick);
+
   function renderDropdown(results) {
     dropdown.innerHTML = "";
     focusableElements = [];
@@ -260,22 +237,21 @@ export function createAddressPicker(opts = {}) {
 
     const cityId = citySelect.value;
     const rawQuery = searchInput.value.trim();
-    const query = normalize(rawQuery); // Используем нормализованную строку для highlight
+    const query = normalize(rawQuery);
 
-    // 1. Блок недавних
     const recent = !query ? getRecentAddresses(cityId) : [];
     if (recent.length > 0) {
       const title = document.createElement("div");
       title.textContent = "Недавние адреса";
       title.style.cssText =
-        "padding: 8px 12px; font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--border-color);";
+          "padding: 8px 12px; font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--border-color);";
       dropdown.appendChild(title);
 
       recent.forEach((item) => {
         const el = document.createElement("div");
         el.className = "recent-address-item";
         el.style.cssText =
-          "padding: 10px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border-color);";
+            "padding: 10px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border-color);";
         el.textContent = item.display_name;
         el.onclick = () => selectAddress(item, "elevator");
         dropdown.appendChild(el);
@@ -284,7 +260,7 @@ export function createAddressPicker(opts = {}) {
 
     if (results.length === 0 && recent.length === 0) {
       dropdown.innerHTML =
-        '<div style="padding: 10px; font-size: 13px; color: var(--text-secondary); text-align: center;">Ничего не найдено</div>';
+          '<div style="padding: 10px; font-size: 13px; color: var(--text-secondary); text-align: center;">Ничего не найдено</div>';
       showDropdown();
       return;
     }
@@ -292,12 +268,11 @@ export function createAddressPicker(opts = {}) {
     if (results.length > 0 && recent.length > 0) {
       const divider = document.createElement("div");
       divider.style.cssText =
-        "padding: 8px 12px; font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--border-color);";
+          "padding: 8px 12px; font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--border-color);";
       divider.textContent = "Результаты поиска";
       dropdown.appendChild(divider);
     }
 
-    // 2. Группировка по домам
     const grouped = new Map();
     results.forEach((item) => {
       if (!grouped.has(item.home_id)) {
@@ -312,18 +287,16 @@ export function createAddressPicker(opts = {}) {
       grouped.get(item.home_id).elevators.push(item);
     });
 
-    // 3. Рендер групп
     grouped.forEach((group) => {
       const groupEl = document.createElement("div");
       groupEl.className = "address-group";
       groupEl.style.cssText =
-        "padding: 10px 12px; border-bottom: 1px solid var(--border-color);";
+          "padding: 10px 12px; border-bottom: 1px solid var(--border-color);";
 
-      // Заголовок дома
       const houseEl = document.createElement("div");
       houseEl.className = "address-house-header";
       houseEl.style.cssText =
-        "font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--text-primary);";
+          "font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--text-primary);";
       houseEl.innerHTML = highlight(group.house_display, query);
 
       if (mode === "house" || mode === "any") {
@@ -335,7 +308,6 @@ export function createAddressPicker(opts = {}) {
 
       groupEl.appendChild(houseEl);
 
-      // Контейнер для пилюль
       const pillsWrap = document.createElement("div");
       pillsWrap.className = "address-pills-wrap";
       pillsWrap.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
@@ -345,13 +317,11 @@ export function createAddressPicker(opts = {}) {
         pill.type = "button";
         pill.className = "address-pill";
         pill.innerHTML = highlight(
-          elev.object_name || elev.display_name.split(", ").pop(),
-          query,
+            elev.object_name || elev.display_name.split(", ").pop(),
+            query,
         );
 
         pill.onclick = () => selectAddress(elev, "elevator");
-
-        // Добавляем в массив для клавиатуры
         focusableElements.push(pill);
         pillsWrap.appendChild(pill);
       });
@@ -360,11 +330,10 @@ export function createAddressPicker(opts = {}) {
       dropdown.appendChild(groupEl);
     });
 
-    // Плашка "Показаны первые 50"
     if (results.length === 50) {
       const footer = document.createElement("div");
       footer.style.cssText =
-        "padding: 8px; font-size: 11px; color: var(--text-secondary); text-align: center; background: var(--bg-primary);";
+          "padding: 8px; font-size: 11px; color: var(--text-secondary); text-align: center; background: var(--bg-primary);";
       footer.textContent = "Показаны первые 50 результатов. Уточните запрос.";
       dropdown.appendChild(footer);
     }
@@ -386,7 +355,6 @@ export function createAddressPicker(opts = {}) {
     onChange(selectedData);
   }
 
-  // --- Клавиатура и События ---
   let debounceTimer = null;
 
   async function triggerSearch(val) {
@@ -449,10 +417,6 @@ export function createAddressPicker(opts = {}) {
     }
   };
 
-  document.addEventListener("click", (e) => {
-    if (!searchWrap.contains(e.target)) hideDropdown();
-  });
-
   loadCities();
 
   return {
@@ -461,26 +425,31 @@ export function createAddressPicker(opts = {}) {
     isValid: () => selectedData !== null,
     setValue: (val) => {
       if (!val) return;
-
-      // Сохраняем выбранные данные
       selectedData = val;
       searchInput.value = val.address;
       searchWrap.style.display = "block";
 
       const stringCityId = String(val.city_id);
-
-      // Если города уже загружены (есть опции) — ставим сразу
       if (citySelect.options.length > 1) {
         citySelect.value = stringCityId;
       } else {
-        // Если база еще грузится — запоминаем ID и применим его в loadCities()
         pendingCityId = stringCityId;
       }
-      // Сообщаем наружу (чтобы форма поняла, что адрес выбран)
       onChange(selectedData);
     },
     destroy: () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+
+      // Удаляем глобальные слушатели
+      window.removeEventListener("resize", onWindowResize);
+      window.removeEventListener("scroll", onWindowScroll, true);
+      document.removeEventListener("click", onDocClick);
+
+      // Удаляем подложку
+      backdrop.removeEventListener("click", onBackdropClick);
+      if (backdrop.parentNode) {
+        backdrop.parentNode.removeChild(backdrop);
+      }
     },
   };
 }

@@ -1,7 +1,4 @@
 /**
- * Шаблон А: Главная страница (Журнал «Открытые заявки»)
- */
-/**
  * Шаблон А: Главная страница (Универсальный журнал для открытых и закрытых заявок)
  */
 export function mainPageTemplate() {
@@ -62,9 +59,6 @@ export function mainPageTemplate() {
     </div>`;
 }
 
-// Функции createPageTemplate и detailsPageTemplate остаются прежними...
-
-
 /**
  * Шаблон Б: Страница создания новой заявки (#/create)
  */
@@ -115,10 +109,8 @@ export function createPageTemplate() {
     </div>`;
 }
 
-
 /**
  * Шаблон В: Карточка детальной истории инцидента (#/ticket/:id)
- * СИНХРОНИЗИРОВАНО: Ссылки и контейнеры подготовлены под динамический инжект DetailsController
  */
 export function detailsPageTemplate(ticketId) {
     return `<div id="ticketDetailsDynamicContainer" style="width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column;"></div>`;
@@ -150,24 +142,87 @@ export function loginPageTemplate() {
             </form>
         </div>
     </div>`;
-
 }
+
+/**
+ * Шаблон Д: Страница настроек и личного кабинета (#/settings)
+ */
 export function settingsPageTemplate() {
     return `
-    <div class="container" style="max-width: 600px;">
-        <h1 style="margin-bottom: 1.5rem;">Системные Настройки</h1>
-        <div class="table-wrapper" style="padding: 2rem; display: flex; flex-direction: column; gap: 20px;">
+    <div class="container" style="max-width: 800px;">
+        <h1 style="margin-bottom: 1.5rem;">Личный кабинет и настройки</h1>
+        
+        <div class="table-wrapper" style="padding: 2rem; display: flex; flex-direction: column; gap: 25px;">
             
-            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
-                <h3 style="margin-bottom: 10px;">Город по умолчанию</h3>
-                <select id="settingsDefaultCity" class="search-input"></select>
-                <button id="saveSettingsBtn" class="menu-item active" style="margin-top: 10px; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;">Сохранить</button>
+            <!-- Блок Профиля -->
+            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 20px;">
+                <h3 style="margin-bottom: 15px;">👤 Личные данные</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                    <div>
+                        <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Фамилия</label>
+                        <input type="text" id="profSurname" class="search-input" style="width: 100%;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Имя</label>
+                        <input type="text" id="profName" class="search-input" style="width: 100%;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Отчество</label>
+                        <input type="text" id="profPatronymic" class="search-input" style="width: 100%;">
+                    </div>
+                </div>
             </div>
 
-            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
-                <h3 style="margin-bottom: 10px;">Кэш данных</h3>
-                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">Если адреса перестали отображаться или вышли новые справочники, очистите кэш.</p>
-                <button id="clearAddressCacheBtn" class="menu-item" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; color: #ef4444; background: transparent; cursor: pointer;">Очистить кэш адресов</button>
+            <!-- Блок Смены Пароля -->
+            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 20px;">
+                <h3 style="margin-bottom: 15px;">🔒 Смена пароля</h3>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">Оставьте поля пустыми, если не хотите менять пароль.</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Текущий пароль</label>
+                        <input type="password" id="profPassOld" class="search-input" style="width: 100%;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Новый пароль</label>
+                        <input type="password" id="profPassNew" class="search-input" style="width: 100%;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Блок Настроек Таблицы (Раскрывающийся) -->
+            <details style="border-bottom: 1px solid var(--border-color); padding-bottom: 20px;">
+                <summary style="cursor: pointer; font-size: 1.17em; font-weight: bold; margin-bottom: 15px; outline: none; user-select: none; display: flex; align-items: center; gap: 8px;">
+                    📊 Настройка таблицы
+                </summary>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; padding-top: 10px;">
+                    Используйте стрелки для изменения порядка колонок. Колонки «№» и «Адрес» зафиксированы.
+                </p>
+                <div id="columnsSettingsList" style="display: flex; flex-direction: column; gap: 8px;">
+                    <!-- Сюда рендерятся колонки -->
+                </div>
+            </details>
+
+            <!-- Блок Локальных настроек (Город и Кэш) -->
+            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 20px;">
+                <h3 style="margin-bottom: 15px;">⚙️ Локальные настройки устройства</h3>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display:block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary);">Город по умолчанию (для формы создания)</label>
+                    <div style="display: flex; gap: 10px;">
+                        <select id="settingsDefaultCity" class="search-input" style="flex: 1; max-width: 300px;"></select>
+                        <button id="saveDefaultCityBtn" class="menu-item active" style="padding: 0 16px; border-radius: 6px; border: none; cursor: pointer;">Сохранить город</button>
+                    </div>
+                </div>
+
+                <div>
+                    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">Если адреса перестали отображаться или вышли новые справочники, очистите кэш.</p>
+                    <button id="clearAddressCacheBtn" class="menu-item" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; color: #ef4444; background: transparent; cursor: pointer;">Очистить кэш адресов</button>
+                </div>
+            </div>
+
+            <!-- Глобальная Кнопка Сохранения (Профиль + Колонки) -->
+            <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+                <button id="saveSettingsBtn" class="theme-toggle-btn" style="border-radius: 8px; width: auto; padding: 10px 24px; font-size: 14px; background: var(--accent); color: var(--mark-text); font-weight: 600;">Сохранить профиль и настройки таблицы</button>
             </div>
 
         </div>

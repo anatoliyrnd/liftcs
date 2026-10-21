@@ -40,12 +40,26 @@ class OfflineDB {
     // --- Адреса ---
     async saveAddresses(flatAddresses) {
         const db = await this.dbPromise;
+
+        // Создаем ОДНУ транзакцию на весь процесс
         const tx = db.transaction('address_flat', 'readwrite');
         const store = tx.objectStore('address_flat');
-        await store.clear(); // Очищаем старые
-        for (const addr of flatAddresses) {
-            store.put(addr); // Не ждем await, чтобы быстрее
+
+        // Очищаем старые данные
+        store.clear();
+
+        // Пишем пачками внутри одной транзакции
+        const CHUNK_SIZE = 2000;
+        for (let i = 0; i < flatAddresses.length; i += CHUNK_SIZE) {
+            const chunk = flatAddresses.slice(i, i + CHUNK_SIZE);
+
+            // Promise.all ждет завершения записи пачки,
+            // но не закрывает транзакцию (так как это все еще запросы к store).
+            // Это дает браузеру "подышать" и не переполняет буфер.
+            await Promise.all(chunk.map(addr => store.put(addr)));
         }
+
+        // Закрываем транзакцию после записи всего массива
         await tx.done;
     }
 
@@ -62,33 +76,35 @@ class OfflineDB {
     }
     async searchAddresses(cityId, query) {
         const db = await this.dbPromise;
-        const all = await db.getAllFromIndex('address_flat', 'city_id', cityId);
+        const tx = db.transaction('address_flat', 'readonly');
+        const index = tx.objectStore('address_flat').index('city_id');
+
         const q = query.toLowerCase().trim();
-
-        // Если пусто — отдаем первые 50
-        if (!q) {
-            return all.slice(0, 50);
-        }
-
-        // Разбиваем запрос на токены (слова)
-        const tokens = q.split(' ').filter(t => t.length > 0);
+        const tokens = q ? q.split(' ').filter(t => t.length > 0) : [];
         const results = [];
 
-        for (const item of all) {
-            // Разбиваем строку поиска на слова
-            const words = item.search_string.split(' ');
+        // Открываем курсор только по нужному городу
+        let cursor = await index.openCursor(IDBKeyRange.only(cityId));
 
-            // Проверяем: каждое слово из запроса должно быть началом хотя бы одного слова в базе
-            const isMatch = tokens.every(token =>
-                words.some(word => word.startsWith(token))
-            );
+        while (cursor) {
+            const item = cursor.value;
 
-            if (isMatch) {
+            if (tokens.length === 0) {
+                // Если поиск пустой — набираем первые 50
                 results.push(item);
-                if (results.length >= 50) break; // Ограничиваем 50 результатами
+            } else {
+                const words = item.search_string.split(' ');
+                const isMatch = tokens.every(token => words.some(word => word.startsWith(token)));
+                if (isMatch) {
+                    results.push(item);
+                }
             }
+
+            if (results.length >= 50) break; // Останавливаемся, как только набрали 50
+            cursor = await cursor.continue();
         }
 
+        await tx.done;
         return results;
     }
     // --- Очередь заявок (Outbox) ---
@@ -166,8 +182,21 @@ class OfflineDB {
 
     async getTickets(type) {
         const db = await this.dbPromise;
-        const all = await db.getAll('tickets_cache');
-        return all.filter(t => t._type === type);
+        const tx = db.transaction('tickets_cache', 'readonly');
+        const store = tx.objectStore('tickets_cache');
+        const results = [];
+
+        // Используем курсор вместо getAll
+        let cursor = await store.openCursor();
+        while (cursor) {
+            if (cursor.value._type === type) {
+                results.push(cursor.value);
+            }
+            cursor = await cursor.continue();
+        }
+
+        await tx.done;
+        return results;
     }
 }
 

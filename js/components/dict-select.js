@@ -4,16 +4,6 @@ import { dictStore } from '../dict-store.js';
  * Обёртка над <select> для справочников department / request / group.
  * Наполняется из dictStore, поддерживает placeholder, обязательность,
  * режим «только для чтения» (disabled).
- *
- * Использование:
- *   const sel = createDictSelect({
- *       key: 'department',
- *       placeholder: '— выберите отдел —',
- *       initialValue: '22',
- *       required: true,
- *       onChange: (value, isValid) => { ... }
- *   });
- *   container.appendChild(sel.element);
  */
 export function createDictSelect(opts = {}) {
     const {
@@ -75,9 +65,11 @@ export function createDictSelect(opts = {}) {
 
         getValue: () => select.value || null,
 
+        // ИСПРАВЛЕНО: Добавлен emit() для уведомления родителя
         setValue: (v) => {
             currentValue = v != null ? String(v) : '';
             fill();
+            emit();
         },
 
         isValid,

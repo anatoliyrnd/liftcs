@@ -1,87 +1,65 @@
 import { staffStore } from '../staff-store.js';
 import { userStore } from '../user-store.js';
 import { dictStore } from '../dict-store.js';
+import { authStore } from '../auth-store.js'; // <-- ДОБАВЛЕНО ДЛЯ FALLBACK
 import { API, AUTH } from '../config.js';
 
 /**
  * Класс динамического адаптивного управления навигационным меню SPA.
- *
- * Особенности:
- *  - Глобальные слушатели (click вне меню, hashchange) навешиваются ОДИН раз
- *    в конструкторе — не накапливаются при повторных renderMenu().
- *  - Активный пункт подсвечивается через data-target-hash, синхронизируется
- *    на hashchange (кнопка «Назад» в браузере тоже перекрашивает меню).
- *  - Права пунктов берутся из user_permissions (флаги can_*), роль — в userStore.
  */
 export class MenuManager {
-    /**
-     * @param {ApiService} apiInstance
-     * @param {Router} routerInstance
-     * @param {string} containerId - ID элемента навигации в HTML
-     */
     constructor(apiInstance, routerInstance, containerId) {
         this.api = apiInstance;
         this.router = routerInstance;
         this.container = document.getElementById(containerId);
         this.hamburgerBtn = null;
 
-        // Привязка контекста для callback-ов, передаваемых в addEventListener
         this._onDocumentClick = this._onDocumentClick.bind(this);
         this._onHashChange = this._onHashChange.bind(this);
 
-        // Единоразовая регистрация глобальных слушателей
         document.addEventListener('click', this._onDocumentClick);
         window.addEventListener('hashchange', this._onHashChange);
     }
-    /**
-     * Валидация SVG-иконки, пришедшей из ответа сервера.
-     * Отбрасывает всё, что может выполнить произвольный код:
-     * теги <script>, <foreignObject>, атрибуты on* и javascript: URL.
-     *
-     * @param {*} raw — значение item.icon_svg
-     * @returns {string|null} — безопасный SVG-код или null (использовать fallback)
-     */
+
     _sanitizeIconSvg(raw) {
         if (typeof raw !== 'string') return null;
         const s = raw.trim();
         if (!s.startsWith('<svg') || !s.endsWith('</svg>')) return null;
         if (/<script/i.test(s))         return null;
         if (/<foreignObject/i.test(s))  return null;
-        if (/\son\w+\s*=/i.test(s))     return null;   // onload=, onerror=, onclick=...
+        if (/\son\w+\s*=/i.test(s))     return null;
         if (/javascript:/i.test(s))     return null;
         if (/data:text\/html/i.test(s)) return null;
         return s;
     }
 
-    /**
-     * Точка входа: запрос config, сохранение справочников и прав, рендер меню.
-     */
     async initialize() {
         try {
             const responseData = await this.api.get(
-
                 { data: 'config' },
                 'Генерация интерфейса навигации...'
             );
-            // Если сервер отдал токен — сохраняем и активируем (полка под авторизацию)
-            const token = responseData && responseData.token;
-            if (token) {
-                try { localStorage.setItem(AUTH.TOKEN_STORAGE_KEY, token); } catch (e) {}
-                this.api.setToken(token);
-            }
+
+            // УДАЛЕНО: Блок с AUTH.TOKEN_STORAGE_KEY и localStorage
+            // Токен теперь управляется исключительно через authStore и httpOnly cookie.
+
             // Справочник механиков — в глобальный стор
             staffStore.setList(responseData && responseData.staff_list);
+
             // Справочники отдел / запрос / группа — в глобальный стор
             if (responseData) {
                 dictStore.set('department', responseData.department);
                 dictStore.set('request', responseData.request);
                 dictStore.set('group', responseData.group);
             }
+
             // Роль и ID пользователя — в глобальный стор.
-            // Невалидная роль автоматически превратится в 'guest'.
             const perms = (responseData && responseData.user_permissions) || {};
             userStore.setRole(perms.role);
-            userStore.setUserId(perms.user_id);
+
+            // ДОБАВЛЕНО: fallback на authStore, если сервер не прислал user_id
+            const effectiveUserId = perms.user_id ?? (authStore.getUser()?.id ?? null);
+            userStore.setUserId(effectiveUserId);
 
             if (responseData && Array.isArray(responseData.menu_structure)) {
                 this.renderMenu(responseData.menu_structure, perms);
@@ -97,11 +75,6 @@ export class MenuManager {
         }
     }
 
-    /**
-     * Физический рендеринг адаптивного меню.
-     * @param {Array} menuStructure
-     * @param {Object} userPermissions - флаги can_* для проверки required_permission
-     */
     renderMenu(menuStructure, userPermissions = {}) {
         if (!this.container) return;
 
@@ -112,7 +85,6 @@ export class MenuManager {
         this.container.innerHTML = '';
         this.container.className = 'responsive-menu-list';
 
-        // 1. Кнопка-гамбургер для мобильной вёрстки
         this.hamburgerBtn = document.createElement('button');
         this.hamburgerBtn.className = 'menu-hamburger-trigger';
         this.hamburgerBtn.setAttribute('title', 'Открыть меню');
@@ -127,10 +99,9 @@ export class MenuManager {
         });
         navParent.insertBefore(this.hamburgerBtn, this.container);
 
-        // 2. Пункты меню
         menuStructure.forEach(item => {
             if (item.required_permission && !userPermissions[item.required_permission]) {
-                return; // пункт скрыт — нет права
+                return;
             }
 
             const li = document.createElement('li');
@@ -154,7 +125,6 @@ export class MenuManager {
                 element.href = item.target_hash;
             }
 
-            // data-атрибут — единый источник для синхронизации .active
             element.setAttribute('data-target-hash', item.target_hash);
 
             element.addEventListener('click', (e) => {
@@ -167,14 +137,9 @@ export class MenuManager {
             this.container.appendChild(li);
         });
 
-        // 3. Первичная синхронизация .active с текущим hash
         this._syncActiveState();
     }
 
-    /**
-     * Клик вне меню — закрыть мобильное выпадающее меню.
-     * Навешивается один раз в конструкторе, не копится.
-     */
     _onDocumentClick(e) {
         if (!this.container) return;
         if (!this.container.classList.contains('open')) return;
@@ -182,18 +147,10 @@ export class MenuManager {
         this.container.classList.remove('open');
     }
 
-    /**
-     * Смена hash — перекрасить активный пункт.
-     * Работает и для кликов в меню, и для кнопки «Назад» в браузере.
-     */
     _onHashChange() {
         this._syncActiveState();
     }
 
-    /**
-     * Проставляет .active пункту меню, чей data-target-hash
-     * совпадает с текущим window.location.hash.
-     */
     _syncActiveState() {
         if (!this.container) return;
 
@@ -204,7 +161,6 @@ export class MenuManager {
 
         let matched = this.container.querySelector(`[data-target-hash="${currentHash}"]`);
 
-        // Для '#/ticket/35732' точного совпадения не будет — считаем активной главную
         if (!matched && currentHash.startsWith('#/ticket/')) {
             matched = this.container.querySelector('[data-target-hash="#/"]');
         }
@@ -216,9 +172,6 @@ export class MenuManager {
         }
     }
 
-    /**
-     * Резервное меню, если сервер не отдал menu_structure.
-     */
     _renderDefaultFallbackMenu() {
         const defaultStructure = [
             { "id": "create", "title": "Добавить заявку", "type": "icon-button", "icon_svg": "<svg viewBox='0 0 24 24' width='20' height='20' fill='currentColor'><path d='M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z'/></svg>", "target_hash": "#/create" },

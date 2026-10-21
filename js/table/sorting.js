@@ -1,13 +1,5 @@
 import { tableSettings } from './settings.js';
-
-export function parseDate(dateStr) {
-    if (!dateStr || dateStr === '—') return new Date(0);
-    const head = String(dateStr).split(' ')[0];
-    const sep = head.includes('.') ? '.' : '/';
-    const [a, b, y] = head.split(sep).map(Number);
-    if (!a || !b || !y) return new Date(0);
-    return new Date(y, b - 1, a);
-}
+import { parseAnyDate } from '../utils/date-utils.js';
 
 export function sortRows(rows, columnId, isAscending) {
     const col = tableSettings.columns.find(c => c.id === columnId);
@@ -24,7 +16,9 @@ export function sortRows(rows, columnId, isAscending) {
             return isAscending ? na - nb : nb - na;
         }
         if (type === 'date') {
-            const da = parseDate(va), db = parseDate(vb);
+            // Теперь в ячейке лежит отформатированная строка, парсим её обратно в Date
+            const da = parseAnyDate(va)?.getTime() || 0;
+            const db = parseAnyDate(vb)?.getTime() || 0;
             return isAscending ? da - db : db - da;
         }
         return isAscending ? va.localeCompare(vb, 'ru') : vb.localeCompare(va, 'ru');

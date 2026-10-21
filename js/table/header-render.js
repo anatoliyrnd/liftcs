@@ -1,6 +1,5 @@
 import { tableSettings, getFreezeLeftOffset, HIDDEN_IN_MODE } from './settings.js';
 import { setupResizableColumn } from './resizer.js';
-import { setupDragAndDrop } from './drag-drop.js';
 
 /**
  * Рендерит заголовки таблицы (TH) с поддержкой липкой фиксации № и Адреса
@@ -14,20 +13,18 @@ export function rebuildTableHeaders(tableElement, onSortCallback, onRefreshCache
     const trHead = document.createElement('tr');
     thead.appendChild(trHead);
 
+    // Оставляем возможность менять ширину только для двух колонок (или можно убрать вообще)
     const resizableColumns = ['address', 'details'];
-    const freezeLeftOffset = getFreezeLeftOffset(); // Рассчитываем сдвиг left
+    const freezeLeftOffset = getFreezeLeftOffset();
 
     // СИНХРОНИЗАЦИЯ: Автоматическая генерация динамических CSS правил скрытия
     _syncDynamicHiddenStyles();
 
     tableSettings.columns.forEach((col, index) => {
+        if (col.hidden || col.visible === false) return;//Пропускаем скрытые колонки, чтобы шапка совпадала с телом
         const th = document.createElement('th');
         th.textContent = col.name;
         th.setAttribute('data-id', col.id);
-
-        // ИСПРАВЛЕНО: Присваиваем стабильный, сквозной индекс оригинального массива.
-        // Поскольку ячейки скрыты через CSS [display:none], они обязаны сохранять свои физические
-        // порядковые номера в DOM-структуре, чтобы не ломать вычисления в resizer.js и drag-drop.js!
         th.setAttribute('data-index', index);
         th.setAttribute('data-type', col.dataType);
 
@@ -43,16 +40,13 @@ export function rebuildTableHeaders(tableElement, onSortCallback, onRefreshCache
             th.classList.add('sticky-freeze-border');
         }
 
+        // Обработчик сортировки
         if (col.sortable) {
             th.classList.add('sortable');
             th.addEventListener('click', () => onSortCallback(th, col.id, col.dataType));
         }
 
-        if (col.movable) {
-            th.setAttribute('draggable', 'true');
-            setupDragAndDrop(th, tableElement, onSortCallback, onRefreshCache);
-        }
-
+        // РЕСАЙЗЕР (изменение ширины колонки мышкой)
         if (resizableColumns.includes(col.id)) {
             const resizer = document.createElement('div');
             resizer.className = 'resizer';
