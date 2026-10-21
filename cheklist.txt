@@ -1,52 +1,54 @@
- Чек-лист для нового чата
-1. Уточнения по контракту API (что нужно зафиксировать в документации)
-Формат repair_time: Переводим на Unix timestamp (рекомендую передавать в секундах или миллисекундах). Это решит все проблемы с часовыми поясами.
+ Подготовка к переносу в новый чат
+Я подготовил готовый текст, который нужно будет отправить в новом окне чата, прикрепив к нему нужные файлы.
 
-Новые экшены:
+📝 Текст для отправки в новом чате:
+Контекст: Мы разрабатываем SPA «Lift-Calls» (Vanilla JS, ES Modules, IndexedDB, PHP-бэкенд). Нам нужно обновить документацию и внести правки в код согласно новому контракту API.
 
-callNewOffline — для отправки пачки офлайн-заявок (по 10 шт.).
+Задачи на спринт:
 
-callClose — для закрытия заявки (передает только call_id, user_id (опционально), solution).
+Исправить синтаксис и дубли в документации (Markdown).
 
-Частичное обновление (calledit): Фронт отправляет только измененные поля (dirty tracking).
+Обновить протоколы (API, Auth, Offline, TechDebt).
 
-Запрет на смену адреса: В calledit больше не передаются city_id, street_id, home_id, object_id.
+Внести правки в JS-код (пикер даты, контроллеры создания/редактирования, синхронизация).
 
-Ответ на синхронизацию: Сервер возвращает status: "ok", после чего фронт делает отдельный запрос data: "open".
+Новые правила API (согласовано):
 
-2. Обновление документации (Markdown)
-Нужно будет переписать файлы, исправив синтаксис, дубли и обновив контракты:
+repair_time передается как Unix timestamp (в секундах).
 
-API_PROTOCOL.md — исправить битые блоки кода, дубли в callnew, обновить calledit, добавить callClose и callNewOffline, обновить формат repair_time.
+callnew: поля city_id, fullAddress, repair_time (timestamp).
 
-OFFLINE_PROTOCOL.md — описать логику батчинга по 10 шт через callNewOffline.
+calledit: передаем только измененные поля (dirty tracking), адрес менять нельзя.
 
-AUTH_PROTOCOL.md — убрать лишние комментарии, поправить заголовок.
+callClose: новый экшен { action: "callClose", call_id, solution, user_id }. Проверка user_id пока мягкая.
 
-TECHNICAL_DEBT.md — убрать дублирующиеся разделы, поправить верстку списков.
+callNewOffline: новый экшен для синхронизации { action: "callNewOffline", tickets: [...] }. Сервер всегда ждет массив и прогоняет через foreach. Отправка пачками по 10 шт.
 
-3. Правки во Frontend-коде (JS)
-js/components/repair-time-picker.js: Изменить метод getValue() (или добавить getTimestamp()), чтобы он возвращал Unix timestamp, а не строку DD/MM/YYYY HH:MM.
+После успешной синхронизации офлайн-пачки фронт отдельно дергает data: "open".
 
-js/create-controller.js:
+Файлы для прикрепления к чату:
 
-Обновить формирование newTicket: использовать city_id, fullAddress, repair_time (timestamp).
+Документация: API_PROTOCOL.md, AUTH_PROTOCOL.md, OFFLINE_PROTOCOL.md, TECHNICAL_DEBT.md.
 
-При сохранении в офлайн, формировать payload для нового экшена callNewOffline.
+JS-код: js/config.js, js/components/repair-time-picker.js, js/create-controller.js, js/sync-manager.js, js/details-controller.js.
 
-js/sync-manager.js: Изменить метод отправки. Теперь он шлет пачки (массив заявок) через action: "callNewOffline". После успеха делает запрос data: "open".
+📂 Какие файлы тебе нужно будет прикрепить (скачать/скопировать):
+API_PROTOCOL.md
 
-js/details-controller.js:
+AUTH_PROTOCOL.md
 
-В методе _onSave (режим edit): убедиться, что отправляется только pendingChanges (это уже так) и убрать возможность изменения адреса.
+OFFLINE_PROTOCOL.md
 
-В методе _onSave (режим close): изменить payload на action: "callClose" с полями call_id и solution (и опционально user_id).
+TECHNICAL_DEBT.md
 
-js/api-service.js (опционально): возможно, добавить хелперы для новых экшенов, чтобы не хардкодить строки в контроллерах.
+js/config.js
 
-4. Возможные вопросы для серверной команды (уточнить при интеграции)
-Unix timestamp: Сервер ждет время в секундах (10 цифр) или в миллисекундах (13 цифр)?
+js/components/repair-time-picker.js
 
-callNewOffline: Сервер ждет массив заявок прямо в корне ({ action: 'callNewOffline', tickets: [...] }) или в другом формате?
+js/create-controller.js
 
-callClose: Если мы передаем user_id, сервер строго сверяет его с сессией (чтобы Иванов не закрыл заявку от имени Петрова) и возвращает ошибку при несовпадении? Или просто игнорирует переданный user_id и берет из токена?
+js/sync-manager.js
+
+js/details-controller.js
+
+Как только будешь готов — открывай новый чат, прикрепляй эти файлы и копируй текст выше. Я жду тебя там, и мы начнем с чистой документации!
