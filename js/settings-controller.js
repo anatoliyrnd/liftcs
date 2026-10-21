@@ -1,267 +1,168 @@
-import { offlineDB } from './offline-db.js';
-import { notify } from './components/notify.js';
-import { logHistoryAction } from './history-logger.js';
-import { tableSettings } from './table/settings.js';
+import { offlineDB } from "./offline-db.js";
+import { notify } from "./components/notify.js";
+import { logHistoryAction } from "./history-logger.js";
+import { userStore } from "./user-store.js"; // Добавлен импорт для проверки ролей
 
 export class SettingsController {
-    constructor(api, router) {
-        this.api = api;
-        this.router = router;
-        this._currentColumns = [];
+  constructor(api, router) {
+    this.api = api;
+    this.router = router;
+  }
+
+  async mount() {
+    await this._initLocalSettings();
+    this._initOrgKey();
+  }
+
+  // --- ЛОГИКА КЛЮЧА ОРГАНИЗАЦИИ ---
+  _initOrgKey() {
+    const block = document.getElementById("orgKeyBlock");
+    const input = document.getElementById("orgKeyInput");
+    const btnEdit = document.getElementById("editOrgKeyBtn");
+    const btnSave = document.getElementById("saveOrgKeyBtn");
+    const btnCancel = document.getElementById("cancelOrgKeyBtn");
+
+    if (!block || !input) return;
+
+    const currentKey = localStorage.getItem("org_key");
+    const isAdmin = userStore.isAdmin();
+    const isDispatcher = userStore.isDispatcher();
+
+    // 1. Логика отображения блока (кто видит)
+    if (isAdmin || isDispatcher) {
+      block.style.display = "block";
+    } else {
+      block.style.display = "none"; // Инженеры и гости не видят
+      return;
     }
 
-    async mount() {
-        // 1. Загрузка данных профиля и колонок с сервера
-        await this._loadUserData();
+    // 2. Начальное состояние UI
+    const setDisplayMode = () => {
+      const key = localStorage.getItem("org_key");
+      input.value = key ? "********" : ""; // Звездочки, если ключ есть
+      input.disabled = true;
+      input.type = "text"; // Или 'password' если хочешь реальные звездочки, но мы договорились текст
 
-        // 2. Отрисовка колонок
-        this._renderColumnsSettings();
+      btnEdit.style.display = "none";
+      btnSave.style.display = "none";
+      btnCancel.style.display = "none";
 
-        // 3. Инициализация старых настроек (Город, Кэш)
-        await this._initLocalSettings();
+      // Кнопку "Редактировать" видит админ всегда, а диспетчер - только если ключ пуст
+      if (isAdmin || (isDispatcher && !key)) {
+        btnEdit.style.display = "inline-block";
+      }
+    };
 
-        // 4. Обработчик сохранения профиля и колонок
-        const saveBtn = document.getElementById('saveSettingsBtn');
-        if (saveBtn) {
-            saveBtn.onclick = () => this._saveSettings();
+    setDisplayMode();
+
+    // 3. Обработчик кнопки "Редактировать"
+    btnEdit.onclick = () => {
+      input.disabled = false;
+      input.value = localStorage.getItem("org_key") || ""; // Показываем реальный ключ для правки
+      input.focus();
+
+      btnEdit.style.display = "none";
+      btnSave.style.display = "inline-block";
+      btnCancel.style.display = "inline-block";
+    };
+
+    // 4. Обработчик кнопки "Отмена"
+    btnCancel.onclick = () => {
+      setDisplayMode();
+    };
+
+    // 5. Обработчик кнопки "Сохранить ключ"
+    btnSave.onclick = async () => {
+      const newKey = input.value.trim();
+
+      if (newKey === "") {
+        // Удаление ключа
+        if (
+          confirm(
+            "Вы уверены, что хотите удалить ключ организации с этого устройства?",
+          )
+        ) {
+          localStorage.removeItem("org_key");
+          notify.success("Ключ организации удален");
+          logHistoryAction("Удален ключ организации");
+          setDisplayMode();
         }
+        return;
+      }
+
+      if (newKey === localStorage.getItem("org_key")) {
+        setDisplayMode();
+        return; // Ключ не изменился
+      }
+
+      btnSave.disabled = true;
+      btnSave.textContent = "Проверка...";
+
+      try {
+        const resp = await this.api.post(
+          { data: "check_org_key", org_key: newKey },
+          "Проверка ключа...",
+        );
+
+        if (resp && resp.status === "ok") {
+          localStorage.setItem("org_key", newKey);
+          notify.success("Ключ организации успешно сохранен");
+          logHistoryAction("Обновлен ключ организации");
+          setDisplayMode();
+        } else {
+          notify.error(resp.message || "Неверный ключ организации");
+        }
+      } catch (e) {
+        console.error(e);
+        notify.error("Сбой сети при проверке ключа");
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = "Сохранить ключ";
+      }
+    };
+  }
+
+  // --- СТАРАЯ ЛОГИКА (Город и Кэш) ---
+  async _initLocalSettings() {
+    const cities = await offlineDB.getCities();
+    const select = document.getElementById("settingsDefaultCity");
+    if (select) {
+      select.innerHTML = '<option value="">— Не выбран —</option>';
+      cities.forEach((c) => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.textContent = c.name;
+        select.appendChild(opt);
+      });
+
+      const current = await offlineDB.getConfig("default_city_id");
+      if (current) select.value = current;
     }
 
-    async _loadUserData() {
-        try {
-            const response = await this.api.post({ data: 'get_user_settings' }, 'Загрузка профиля...');
-
-            if (response && response.status === 'ok') {
-                const p = response.profile || {};
-                const profSurname = document.getElementById('profSurname');
-                const profName = document.getElementById('profName');
-                const profPatronymic = document.getElementById('profPatronymic');
-
-                if (profSurname) profSurname.value = p.surname || '';
-                if (profName) profName.value = p.name || '';
-                if (profPatronymic) profPatronymic.value = p.patronymic || '';
-
-                // Изолированная копия объектов (сохраняет функции, если появятся)
-                const baseColumns = tableSettings.columns.map(c => ({ ...c }));
-
-                if (response.column_settings && response.column_settings.order) {
-                    this._currentColumns = baseColumns;
-
-                    const orderArr = response.column_settings.order;
-                    const hiddenArr = response.column_settings.hidden || [];
-
-                    this._currentColumns.forEach(col => {
-                        col.visible = !hiddenArr.includes(col.id);
-                    });
-
-                    // Безопасная сортировка: неизвестные колонки улетают в конец
-                    const getOrderIndex = id => {
-                        const i = orderArr.indexOf(id);
-                        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-                    };
-                    this._currentColumns.sort((a, b) => getOrderIndex(a.id) - getOrderIndex(b.id));
-                } else {
-                    // Твой вариант: убран лишний map, проставляем visible на основе конфига
-                    baseColumns.forEach(c => c.visible = !c.hidden);
-                    this._currentColumns = baseColumns;
-                }
-            } else {
-                this._currentColumns = tableSettings.columns.map(c => ({ ...c, visible: !c.hidden }));
-            }
-        } catch (e) {
-            console.error('[SettingsController] Ошибка загрузки профиля:', e);
-            this._currentColumns = tableSettings.columns.map(c => ({ ...c, visible: !c.hidden }));
-        }
+    const saveCityBtn = document.getElementById("saveDefaultCityBtn");
+    if (saveCityBtn) {
+      saveCityBtn.onclick = async () => {
+        const val = select.value ? Number(select.value) : null;
+        await offlineDB.setConfig("default_city_id", val);
+        notify.success("Город по умолчанию сохранен");
+        logHistoryAction("Изменен город по умолчанию");
+      };
     }
 
-    _renderColumnsSettings() {
-        const container = document.getElementById('columnsSettingsList');
-        if (!container) return;
-        container.innerHTML = '';
-
-        if (!this._currentColumns || this._currentColumns.length === 0) {
-            container.innerHTML = '<div style="color:red; font-size:12px;">Ошибка: список колонок пуст. Проверьте settings.js</div>';
-            return;
+    const clearBtn = document.getElementById("clearAddressCacheBtn");
+    if (clearBtn) {
+      clearBtn.onclick = async () => {
+        if (
+          confirm(
+            "Вы уверены, что хотите удалить кэш адресов? Придется скачать их заново.",
+          )
+        ) {
+          await offlineDB.saveAddresses([]);
+          localStorage.removeItem("recent_addresses");
+          notify.warning("Кэш адресов очищен. Перезагрузка...");
+          setTimeout(() => window.location.reload(), 1500);
         }
-
-        this._currentColumns.forEach((col, index) => {
-            const row = document.createElement('div');
-            row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;';
-
-            const leftPart = document.createElement('div');
-            leftPart.style.cssText = 'display: flex; align-items: center; gap: 10px;';
-
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.checked = col.visible !== false;
-
-            if (col.isAbsoluteFixed || col.isRequired) {
-                checkbox.disabled = true;
-                checkbox.title = 'Эту колонку нельзя скрыть';
-                checkbox.checked = true;
-            } else {
-                checkbox.onchange = (e) => { col.visible = e.target.checked; };
-            }
-
-            const label = document.createElement('span');
-            label.textContent = col.name;
-            label.style.fontSize = '14px';
-
-            leftPart.appendChild(checkbox);
-            leftPart.appendChild(label);
-
-            const rightPart = document.createElement('div');
-            rightPart.style.cssText = 'display: flex; gap: 4px;';
-
-            const btnUp = document.createElement('button');
-            btnUp.innerHTML = '↑';
-            btnUp.className = 'theme-toggle-btn';
-            btnUp.style.cssText = 'padding: 4px 8px; font-size: 14px; border-radius: 4px; cursor: pointer;';
-
-            const btnDown = document.createElement('button');
-            btnDown.innerHTML = '↓';
-            btnDown.className = 'theme-toggle-btn';
-            btnDown.style.cssText = 'padding: 4px 8px; font-size: 14px; border-radius: 4px; cursor: pointer;';
-
-            btnUp.disabled = index === 0 || col.isAbsoluteFixed || this._currentColumns[index - 1]?.isAbsoluteFixed;
-            btnDown.disabled = index === this._currentColumns.length - 1 || col.isAbsoluteFixed;
-
-            if (btnUp.disabled) { btnUp.style.opacity = '0.3'; btnUp.style.cursor = 'not-allowed'; }
-            if (btnDown.disabled) { btnDown.style.opacity = '0.3'; btnDown.style.cursor = 'not-allowed'; }
-
-            btnUp.onclick = () => {
-                if (btnUp.disabled) return;
-                const temp = this._currentColumns[index - 1];
-                this._currentColumns[index - 1] = this._currentColumns[index];
-                this._currentColumns[index] = temp;
-                this._renderColumnsSettings();
-            };
-
-            btnDown.onclick = () => {
-                if (btnDown.disabled) return;
-                const temp = this._currentColumns[index + 1];
-                this._currentColumns[index + 1] = this._currentColumns[index];
-                this._currentColumns[index] = temp;
-                this._renderColumnsSettings();
-            };
-
-            rightPart.appendChild(btnUp);
-            rightPart.appendChild(btnDown);
-
-            row.appendChild(leftPart);
-            row.appendChild(rightPart);
-            container.appendChild(row);
-        });
+      };
     }
-
-    async _saveSettings() {
-        const btn = document.getElementById('saveSettingsBtn');
-        btn.disabled = true;
-        btn.textContent = 'Сохранение...';
-
-        const profile = {
-            surname: document.getElementById('profSurname').value.trim(),
-            name: document.getElementById('profName').value.trim(),
-            patronymic: document.getElementById('profPatronymic').value.trim()
-        };
-
-        const passOld = document.getElementById('profPassOld').value;
-        const passNew = document.getElementById('profPassNew').value;
-        let password = null;
-        if (passOld || passNew) {
-            if (!passOld || !passNew) {
-                notify.error('Для смены пароля заполните оба поля');
-                btn.disabled = false;
-                btn.textContent = 'Сохранить профиль и настройки таблицы';
-                return;
-            }
-            password = { old: passOld, new: passNew };
-        }
-
-        const order = [];
-        const hidden = [];
-        this._currentColumns.forEach(col => {
-            order.push(col.id);
-            if (col.visible === false) hidden.push(col.id);
-        });
-
-        const payload = {
-            action: 'save_user_settings',
-            profile,
-            column_settings: { order, hidden }
-        };
-        if (password) payload.password = password;
-
-        try {
-            const response = await this.api.post(payload, 'Сохранение настроек...');
-
-            if (response && response.status === 'ok') {
-                notify.success(response.message || 'Настройки сохранены');
-                logHistoryAction('Обновлены настройки профиля/таблицы');
-
-                document.getElementById('profPassOld').value = '';
-                document.getElementById('profPassNew').value = '';
-
-                this._applyLocalTableSettings(order, hidden);
-            } else {
-                notify.error(response.message || 'Ошибка сохранения');
-            }
-        } catch (e) {
-            console.error(e);
-            notify.error('Сбой сети при сохранении');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Сохранить профиль и настройки таблицы';
-        }
-    }
-
-    _applyLocalTableSettings(order, hidden) {
-        localStorage.setItem('tableColumnOrder', order.join(','));
-        localStorage.setItem('tableColumnHidden', JSON.stringify(hidden));
-
-        tableSettings.columns.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-        tableSettings.columns.forEach(col => {
-            col.hidden = hidden.includes(col.id);
-            col.visible = !col.hidden;
-        });
-    }
-
-    async _initLocalSettings() {
-        const cities = await offlineDB.getCities();
-        const select = document.getElementById('settingsDefaultCity');
-        if (select) {
-            select.innerHTML = '<option value="">— Не выбран —</option>';
-            cities.forEach(c => {
-                const opt = document.createElement('option');
-                opt.value = c.id;
-                opt.textContent = c.name;
-                select.appendChild(opt);
-            });
-
-            const current = await offlineDB.getConfig('default_city_id');
-            if (current) select.value = current;
-        }
-
-        const saveCityBtn = document.getElementById('saveDefaultCityBtn');
-        if (saveCityBtn) {
-            saveCityBtn.onclick = async () => {
-                const val = select.value ? Number(select.value) : null;
-                await offlineDB.setConfig('default_city_id', val);
-                notify.success('Город по умолчанию сохранен');
-                logHistoryAction('Изменен город по умолчанию');
-            };
-        }
-
-        const clearBtn = document.getElementById('clearAddressCacheBtn');
-        if (clearBtn) {
-            clearBtn.onclick = async () => {
-                if (confirm('Вы уверены, что хотите удалить кэш адресов? Придется скачать их заново.')) {
-                    await offlineDB.saveAddresses([]);
-                    localStorage.removeItem('recent_addresses');
-                    notify.warning('Кэш адресов очищен. Перезагрузка...');
-                    setTimeout(() => window.location.reload(), 1500);
-                }
-            };
-        }
-    }
+  }
 }

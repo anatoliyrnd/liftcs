@@ -25,7 +25,33 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $rawBody = file_get_contents('php://input');
 $input = json_decode($rawBody, true);
+// ============================================================
+// 0. НОВЫЕ ЗАГЛУШКИ: Ключ организации и список юзеров
+// ============================================================
+if (isset($input['data']) && $input['data'] === 'check_org_key') {
+    $key = $input['org_key'] ?? '';
+    if ($key === '1234') {
+        echo json_encode(['status' => 'ok', 'message' => 'Ключ действителен']);
+    } else {
+        echo json_encode(['status' => 'error', 'code' => 'invalid_key', 'message' => 'Неверный ключ организации']);
+    }
+    exit;
+}
 
+if (isset($input['data']) && $input['data'] === 'get_org_users') {
+    // В реальности здесь была бы проверка org_key из $input['org_key']
+    echo json_encode([
+        'status' => 'ok',
+        'users' => [
+            ['user_id' => 1, 'name' => 'Администратор'],
+            ['user_id' => 2, 'name' => 'Диспетчер Петрова'],
+            ['user_id' => 3, 'name' => 'Сергеенко Сергей'],
+            ['user_id' => 4, 'name' => 'Тест Истечения'],
+            ['user_id' => 5, 'name' => 'Заблокированный']
+        ]
+    ]);
+    exit;
+}
 // ============================================================
 // 1. ЗАГЛУШКА: Адреса
 // ============================================================
@@ -83,13 +109,16 @@ if (isset($input['action']) && $input['action'] === 'save_user_settings') {
 // ============================================================
 $mockFile = __DIR__ . '/mock_tickets.json';
 
-function getMockTickets($file) {
-    if (!file_exists($file)) return [];
+function getMockTickets($file)
+{
+    if (!file_exists($file))
+        return [];
     $data = json_decode(file_get_contents($file), true);
     return is_array($data) ? $data : [];
 }
 
-function saveMockTicket($file, $ticketData, $authorName = null) {
+function saveMockTicket($file, $ticketData, $authorName = null)
+{
     $existing = getMockTickets($file);
 
     $ticketData['id'] = rand(100000, 999999);
@@ -188,7 +217,7 @@ if (isset($input['data']) && $input['data'] === 'open') {
 if (isset($input['data']) && $input['data'] === 'notifications') {
     echo json_encode([
         'notifications' => [],
-        'last_id' => (int)($input['since_id'] ?? 0),
+        'last_id' => (int) ($input['since_id'] ?? 0),
         'versions' => ['staff' => 0, 'dicts' => 0],
         'outdated' => []
     ]);

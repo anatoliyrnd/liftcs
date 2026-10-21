@@ -18,12 +18,15 @@ export class TicketsController {
     this.api = apiInstance;
     this.router = routerInstance;
     this.dataType = dataType;
-    this.selectedDays = localStorage.getItem("tablePeriod_" + this.dataType) || "1";
+    this.selectedDays =
+      localStorage.getItem("tablePeriod_" + this.dataType) || "1";
 
     this.rowsCache = [];
 
     // ВОССТАНАВЛИВАЕМ СОРТИРОВКУ ИЗ LOCALSTORAGE
-    const savedSortId = localStorage.getItem("tableSortColumn_" + this.dataType);
+    const savedSortId = localStorage.getItem(
+      "tableSortColumn_" + this.dataType,
+    );
     this.currentSortColumnId = savedSortId ? parseInt(savedSortId, 10) : -1;
 
     const savedSortDir = localStorage.getItem("tableSortDir_" + this.dataType);
@@ -80,14 +83,21 @@ export class TicketsController {
       let offlineTickets = [];
       if (this.dataType === "open") {
         const outbox = await offlineDB.getAllFromOutbox();
-        offlineTickets = outbox.map((o) => ({
-          ...o.payload,
-          id: o.uuid,
-          type: "open",
-          isOffline: true,
-          address: o.payload.fullAddress || o.payload.address,
-          date: Math.floor(Number(o.created_at)), // <--- ДОБАВЛЕНО
-        }));
+        offlineTickets = outbox.map((o) => {
+          const createdAt = Number(o.created_at);
+          // Защита от миллисекунд в офлайн-заявках
+          const dateInSeconds =
+            createdAt > 9999999999 ? Math.floor(createdAt / 1000) : createdAt;
+
+          return {
+            ...o.payload,
+            id: o.uuid,
+            type: "open",
+            isOffline: true,
+            address: o.payload.fullAddress || o.payload.address,
+            date: dateInSeconds,
+          };
+        });
       }
 
       if (fresh) {
@@ -97,7 +107,6 @@ export class TicketsController {
 
         // И сохраняем их в кэш (на случай, если следующий раз откроем без сети)
         await offlineDB.saveTickets(this.dataType, fresh);
-
       } else {
         // 2. Если сети нет (fresh === null) — берем данные из кэша!
         logHistoryAction("Нет соединения. Загрузка из офлайн-кэша...");
@@ -177,7 +186,11 @@ export class TicketsController {
         postPayload.period = this.selectedDays;
       }
 
-      const data = await this.api.post(postPayload, statusMessage, "tickets_" + this.dataType);
+      const data = await this.api.post(
+        postPayload,
+        statusMessage,
+        "tickets_" + this.dataType,
+      );
 
       if (data && data.code === "aborted") return null;
       if (!data || data.status === "error") {
@@ -210,11 +223,18 @@ export class TicketsController {
     let filteredData = [...globalTicketsArrayRef];
     if (this.dataType === "open") {
       // Фильтрация по timestamp (в секундах)
-      const maxDateTs = nowTs() + (UI.FILTER_REPAIR_DAYS * 24 * 60 * 60);
-      const cityFilterActive = this._allCities.length > 0 && this._filters.cities.length > 0;
+      // Явно переводим Date.now() в секунды
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const maxDateTs = nowSeconds + UI.FILTER_REPAIR_DAYS * 24 * 60 * 60;
+      const cityFilterActive =
+        this._allCities.length > 0 && this._filters.cities.length > 0;
 
       filteredData = filteredData.filter((t) => {
-        if (cityFilterActive && t.city_id && !this._filters.cities.includes(Number(t.city_id))) {
+        if (
+          cityFilterActive &&
+          t.city_id &&
+          !this._filters.cities.includes(Number(t.city_id))
+        ) {
           return false;
         }
         if (this._filters.hideLongRepair) {
@@ -231,9 +251,9 @@ export class TicketsController {
     const thead = dataTable.querySelector("thead");
     if (!thead || !thead.firstElementChild) {
       rebuildTableHeaders(
-          dataTable,
-          (th, colId, type) => this._handleSort(th, colId, type),
-          () => this._refreshRowsCache(),
+        dataTable,
+        (th, colId, type) => this._handleSort(th, colId, type),
+        () => this._refreshRowsCache(),
       );
     }
 
@@ -242,9 +262,13 @@ export class TicketsController {
 
     // Восстанавливаем индикатор сортировки
     if (this.currentSortColumnId !== -1) {
-      const sortedTh = dataTable.querySelector(`th[data-id="${this.currentSortColumnId}"]`);
+      const sortedTh = dataTable.querySelector(
+        `th[data-id="${this.currentSortColumnId}"]`,
+      );
       if (sortedTh) {
-        dataTable.querySelectorAll("th.sortable").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+        dataTable
+          .querySelectorAll("th.sortable")
+          .forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
         sortedTh.classList.add(this.isAscending ? "sort-asc" : "sort-desc");
       }
     }
@@ -315,11 +339,19 @@ export class TicketsController {
     }
 
     // СОХРАНЯЕМ В LOCALSTORAGE
-    localStorage.setItem("tableSortColumn_" + this.dataType, this.currentSortColumnId);
-    localStorage.setItem("tableSortDir_" + this.dataType, this.isAscending ? "asc" : "desc");
+    localStorage.setItem(
+      "tableSortColumn_" + this.dataType,
+      this.currentSortColumnId,
+    );
+    localStorage.setItem(
+      "tableSortDir_" + this.dataType,
+      this.isAscending ? "asc" : "desc",
+    );
 
     const dataTable = document.getElementById("dataTable");
-    dataTable.querySelectorAll("th.sortable").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+    dataTable
+      .querySelectorAll("th.sortable")
+      .forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
     headerElement.classList.add(this.isAscending ? "sort-asc" : "sort-desc");
 
     this._applySort(columnId, this.isAscending);
@@ -331,9 +363,13 @@ export class TicketsController {
 
     const dataTable = document.getElementById("dataTable");
     if (!dataTable) return;
-    const sortedTh = dataTable.querySelector(`th[data-id="${this.currentSortColumnId}"]`);
+    const sortedTh = dataTable.querySelector(
+      `th[data-id="${this.currentSortColumnId}"]`,
+    );
     if (sortedTh) {
-      dataTable.querySelectorAll("th.sortable").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+      dataTable
+        .querySelectorAll("th.sortable")
+        .forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
       sortedTh.classList.add(this.isAscending ? "sort-asc" : "sort-desc");
     }
   }
@@ -402,7 +438,8 @@ export class TicketsController {
 
     cityBtn.onclick = (e) => {
       e.stopPropagation();
-      const isHidden = cityDropdown.style.display === "none" || !cityDropdown.style.display;
+      const isHidden =
+        cityDropdown.style.display === "none" || !cityDropdown.style.display;
       if (isHidden) {
         cityDropdown.style.display = "block";
         backdrop.style.display = "block";
@@ -416,14 +453,14 @@ export class TicketsController {
     this._filtersAbort = new AbortController();
 
     document.addEventListener(
-        "click",
-        (e) => {
-          if (!cityBtn.contains(e.target) && !cityDropdown.contains(e.target)) {
-            cityDropdown.style.display = "none";
-            backdrop.style.display = "none";
-          }
-        },
-        { signal: this._filtersAbort.signal },
+      "click",
+      (e) => {
+        if (!cityBtn.contains(e.target) && !cityDropdown.contains(e.target)) {
+          cityDropdown.style.display = "none";
+          backdrop.style.display = "none";
+        }
+      },
+      { signal: this._filtersAbort.signal },
     );
 
     const selectAllCb = document.getElementById("citySelectAll");
@@ -501,7 +538,9 @@ export class TicketsController {
             e.target.checked = true;
             return;
           }
-          this._filters.cities = this._filters.cities.filter((id) => id !== city.id);
+          this._filters.cities = this._filters.cities.filter(
+            (id) => id !== city.id,
+          );
         }
         this._saveFilters();
         this._renderCityDropdown();
@@ -532,7 +571,10 @@ export class TicketsController {
 
   _saveFilters() {
     localStorage.setItem("filter_cities", JSON.stringify(this._filters.cities));
-    localStorage.setItem("filter_hide_long", this._filters.hideLongRepair.toString());
+    localStorage.setItem(
+      "filter_hide_long",
+      this._filters.hideLongRepair.toString(),
+    );
   }
 
   _applyLocalFilters() {
@@ -554,8 +596,13 @@ export class TicketsController {
       return;
     }
 
-    if (window.syncManagerInstance && Date.now() < window.syncManagerInstance._cooldownUntil) {
-      const waitMins = Math.ceil((window.syncManagerInstance._cooldownUntil - Date.now()) / 60000);
+    if (
+      window.syncManagerInstance &&
+      Date.now() < window.syncManagerInstance._cooldownUntil
+    ) {
+      const waitMins = Math.ceil(
+        (window.syncManagerInstance._cooldownUntil - Date.now()) / 60000,
+      );
       btn.disabled = true;
       btn.title = `Синхронизация заблокирована на ${waitMins} мин. из-за ошибки.`;
       btn.style.color = "var(--text-secondary)";

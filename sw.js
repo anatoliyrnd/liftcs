@@ -1,5 +1,5 @@
-// Версия поднята до v6, чтобы браузер сбросил старый (сломанный) кэш
-const CACHE_NAME = "lift-cache-v6";
+// Версия поднята до v7 из-за изменения структуры файлов
+const CACHE_NAME = "lift-cache-v72";
 
 // Список файлов, которые нужны для запуска приложения (App Shell)
 const ASSETS_TO_CACHE = [
@@ -13,7 +13,16 @@ const ASSETS_TO_CACHE = [
 
   // Модули JS
   "./js/route/router.js",
-  "./js/route/pages.js",
+  // УДАЛЕНО: "./js/route/pages.js",
+  // ДОБАВЛЕНО: Новая папка pages
+  "./js/route/pages/index.js",
+  "./js/route/pages/tickets.js",
+  "./js/route/pages/create.js",
+  "./js/route/pages/details.js",
+  "./js/route/pages/login.js",
+  "./js/route/pages/profile.js",
+  "./js/route/pages/settings.js",
+
   "./js/route/menu-manager.js",
   "./js/route/inactivity-tracker.js",
   "./js/api-service.js",
@@ -25,6 +34,7 @@ const ASSETS_TO_CACHE = [
   "./js/create-controller.js",
   "./js/details-controller.js",
   "./js/settings-controller.js",
+  "./js/profile-controller.js", // <-- ДОБАВЛЕНО (создадим на следующем шаге)
   "./js/offline-db.js",
   "./js/sync-manager.js",
   "./js/app-state.js",
