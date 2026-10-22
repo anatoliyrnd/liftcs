@@ -1,290 +1,347 @@
- HANDOFF: Переход Lift-Calls на реальный Бэкенд (Мультитенантность)
-Статус: Фронтенд полностью готов (API v4.0 интегрирован). Переходим к написанию реального бэкенда на PHP 8.3+ с использованием PDO.
+HANDOFF: Lift-Calls — Мультитенантность, Address Service и протокол API v4.0
+Статус: Фронтенд готов (API v4.0 интегрирован). Бэкенд не начат. Архитектура утверждена на уровне принципов, но есть незакрытые развилки, влияющие на OrgManager/AuthService/AddressService.
+Цель нового чата: продолжить проектирование и реализацию бэкенда с учётом зафиксированных решений и открытых вопросов ниже.
 
-🏗️ Утвержденная Архитектура (Multi-Tenant)
-Master DB (Глобальная база):
+1. Исходный контекст (из первого хендоффа)
+Переход на реальный бэкенд PHP 8.3+ / PDO, мультитенантность.
 
-Хранит адресное пространство: lift_city, lift_street, lift_home, lift_object (единые для всех).
+Master DB: глобальное адресное пространство (lift_city, lift_street, lift_home, lift_object), lift_organizations (реквизиты Tenant DB), lift_lkds_bindings (привязка к Spult).
 
-Таблица lift_organizations: содержит org_key, название и реквизиты подключения (host, dbname, user, password) к базе конкретной организации.
+Tenant DB: lift_users, lift_calls, lift_history, lift_notes, группы (lift_groups, lift_group_objects), настройки.
 
-Tenant DB (База организации):
+Spult: односторонняя интеграция (XML → TicketService → create/merge). Автосоздание адресов запрещено, только логирование.
 
-Хранит пользователей (lift_users), заявки (lift_calls), историю и настройки.
+Этапы: 1) OrgManager/PDODB/AuthService, 2) TicketService/PermissionService/GroupService, 3) API-эндпоинты, 4) миграции.
 
-Таблица lift_lkds_bindings: связка глобального object_id с локальным lkds_domain_id для интеграции со Spult.
+Приложенные файлы (нужны в новом чате):
 
-Таблицы групп: lift_groups и lift_group_objects (связь с глобальными ID лифтов/домов/улиц).
+Фронт: js/main.js, js/api-service.js, js/login-controller.js, js/settings-controller.js, js/profile-controller.js
 
-Интеграция со Spult: Односторонняя. Spult присылает XML -> бэкенд парсит -> TicketService создает/объединяет заявку. Автосоздание адресов из XML запрещено (только логирование ошибок).
+Бэкенд: PDODB.php, PDOIterator.php, PDOLog.php, xml.php, 10_0_0_3.sql
 
-🛠️ Проделанная работа (Фронтенд — Готово)
-api-service.js: Добавлен метод loginById. Настроены заголовки.
+Протокол: API_PROTOCOL.md (v4.0)
 
-settings-controller.js: Оставлены только Город, Кэш и Ключ организации (с проверкой прав: админ может всё, диспетчер — только первичный ввод ключа, если его нет).
+Желательно: AUTH_PROTOCOL.md, OFFLINE_PROTOCOL.md, TECHNICAL_DEBT.md (упомянуты, но не приложены)
 
-profile-controller.js: Новый контроллер (ФИО, пароль, настройки таблицы). Обновляет authStore раздельными полями.
+2. Зафиксированные архитектурные решения
+2.1. Address Service
+Центральный Address Service — отдельный сервис (не модуль). Обоснование: тенантские бэкенды могут оказаться за периметром, реквизиты Master DB нельзя раздавать.
 
-login-controller.js: Умный логин с <datalist>, убран window.location.reload(), добавлено событие auth:loggedin.
+Роль центрального сервиса: резолвер имён (batch ID → имена) + глобальная версия имён. Не собирает список адресов организации.
 
-main.js: Стал тонким. Обрабатывает события авторизации, корректно инициализирует меню и загрузку данных.
+Список адресов организации собирает тенантский бэкенд: знает свои лифты, делает batch-резолв имён в центральном API, кэширует имена, комбинирует, отдаёт фронту в loadAddress.
 
-pages/: Шаблоны разбиты по файлам (Vite-ready). Добавлены profile.js и settings.js.
+Контракт Address Service: batch-резолв ID → имена, глобальная версия имён, deprecated/terminated флаги. Версионирование контракта с первого дня.
 
-table/settings.js: Добавлен safeParseJSON (защита от белого экрана) и syncTableSettingsFromStorage().
+Никаких прямых JOIN/FK между Tenant DB и Master DB в прикладном SQL — только через Address Service.
 
-body-render.js: Приоритет alert_level для окраски ячейки id (с фоллбэком на клиентские проверки).
+Реквизиты Master DB не попадают в тенантские конфиги.
 
-tickets-controller.js: Исправлены миллисекунды в фильтрах, даты офлайн-заявок приведены к секундам.
+2.2. Адресные ID (immutable identity)
+ID адресов immutable, не переиспользуются, не удаляются (soft delete / is_active: false).
 
-📝 ЧЕК-ЛИСТ БЭКЕНДА (Что нужно сделать)
-Этап 1: Ядро и Подключения
+Переименование (дом «2/23» → «23», тот же объект) — ID сохраняется.
 
-□ Адаптировать PDODB.php под пул подключений (Master + Tenant).
-□ Создать OrgManager.php (по org_key находит реквизиты в Master DB и инициализирует нужную Tenant DB).
-□ Создать AuthService.php (генерация токенов, проверка паролей, refresh-куки).
+Сплит (дом 23 → 23/1 и 23/2): старый дом становится deprecated, лифты перепривязываются к новым домам, новые дома добавляются. Старые заявки остаются на старом ID.
+
+Слияние: откладываем. При первом реальном случае — вернуться. Обязательство: ID не переиспользуются, заявки не переписываются.
+
+Ошибочная привязка лифта: исправляется перепривязкой. Прошлые заявки в отчёт по новому дому не попадают; они всегда доступны по лифту.
+
+Удаление: запрещено. Terminated лифт/дом остаются в системе.
+
+2.3. Снимок адреса в заявке
+В заявке хранятся и ID (city_id, street_id, home_id, object_id), и текстовый fullAddress.
+
+Снимок в заявке не переписывается. Для открытых и закрытых заявок UI показывает снимок на момент создания.
+
+Сервер собирает fullAddress из авторитетных имён на момент создания (через Address Service / кэш). Клиентский fullAddress — fallback при недоступности Address API. Рассмотреть два поля: клиентский и серверный снимок.
+
+Отчёты строятся по ID-иерархии, не по тексту.
+
+2.4. Отчёты и deprecated/terminated
+Отчёты по дому — best-effort по текущей привязке. После сплита/перепривязки прошлые заявки в отчёт по старому дому не попадают.
+
+Отчёты по конкретному лифту — всегда доступны, включая terminated лифты, за всё время.
+
+Deprecated/terminated лифты не попадают в кэш loadAddress для фронта.
+
+Для исторических отчётов фронт присылает отдельную команду «полный поиск, включая удалённые лифты» (в текущем API_PROTOCOL.md этого нет — надо добавить). Пользователь может посмотреть заявки по terminated лифту за прошлое время и информацию о расторжении договора.
+
+2.5. Версия адресов и кэш
+Фронт кэширует lift-home-street-city в IndexedDB.
+
+Ключ кэша: per-user или per-organization (если передан org_key, кэш привязан к организации и компьютеру диспетчера).
+
+При logout кэш не очищается — org_key ставит администратор организации на диспетчерском компьютере. У всех диспетчеров организации должно быть одно адресное пространство.
+
+Видимость адреса в кэше не влияет на безопасность: если пользователю запрещено смотреть/менять заявку, сервер это не пропустит. Адрес в кэше — это справочник, не данные заявки.
+
+Версия tenant-aware, считает тенантский бэкенд (комбинация глобальной версии имён + локальной версии лифтов/привязок).
+
+Механизм инвалидации: notifications.versions + outdated (уже есть в протоколе). Нужно добавить address в versions.
+
+Версия меняется при любом изменении состава или имён адресного набора организации, не только при изменении количества.
+
+2.6. Лифты, группы, права
+Лифт хранит привязку к группам (lift_id -> group_id). Не группа хранит объекты, а лифт знает свои группы.
+
+UI массово привязывает/отвязывает лифты по улице/дому/городу к группам. Это массовая операция, не динамическое правило.
+
+Привязка жёсткая и актуальная: если лифт убрали из группы A, пользователи без группы A теряют к нему доступ.
+
+Перепривязка лифта к другому дому не меняет его группы.
+
+История привязок лифта к группам не нужна.
+
+Права проверяются по текущим привязкам лифта к группам (на бэкенде).
+
+В будущем прав будет много (изменение полей описания, лифта, удаление/расторжение, привязка к механику-связисту, чтение всех полей и т.д.). PermissionService проектировать с запасом, не только role + три can_*.
+
+2.7. Справочники (group/department/request/staff)
+Для справочников выбран не снимок, а резолв на чтении:
+
+переименовали — показываем новое имя;
+
+удалили — не удаляем из БД, помечаем is_active: false.
+
+Это осознанное отличие от адресов (где выбран снимок).
+
+2.8. Офлайн (частично зафиксировано)
+callNewOffline: пачки по 10, атомарность «всё или ничего», идемпотентность по offline_uuid.
+
+Открытые вопросы по офлайну — см. раздел 4.
+
+2.9. Валидация адресов при создании
+Бэкенд проверяет существование object_id и собирает fullAddress из актуальных на текущий момент названий.
+
+Проверка «лифт сейчас принадлежит этому дому» не должна отвергать корректные офлайн-заявки после перепривязки: IDs — исторический факт.
+
+Политика при недоступности Address Service — см. открытые вопросы (раздел 4).
+
+2.10. org_key и get_org_users
+org_key — не совсем секрет: даёт возможность подгрузить имена диспетчеров в поле логина (datalist), чтобы им было достаточно ввести пароль.
+
+Только после авторизации сервер отдаёт остальные данные.
+
+Текущая модель check_org_key/get_org_users без доп. защиты — приемлема, но см. вопросы.
+
+3. Изменения в API_PROTOCOL.md (зафиксировать в чек-лист)
+3.1. Версия адресов и справочников
+□ Добавить address в notifications.versions (сейчас только staff, dicts).
+□ Возвращать version в ответе loadAddress (сейчас нет). Закрывает гонку между loadAddress и notifications.
+□ Рассмотреть возврат версий staff/dicts в config, чтобы закрыть гонку на старте.
+□ Определить scope версии: tenant-aware (per-org) или per-user. Если loadAddress фильтруется по правам — версия per-user.
+3.2. loadAddress
+□ Решить: all-org или per-user filtered (влияет на ключ кэша и scope версии).
+□ Deprecated/terminated лифты не попадают в loadAddress для кэша фронта.
+□ Для исторических отчётов добавить команду «полный поиск, включая удалённые лифты» (новый action, например searchAddressHistory или флаг в существующем отчёте).
+□ Возвращать информацию о расторжении договора по terminated лифту (когда, причина — если есть).
+3.3. callNewOffline
+□ Добавить created_at (Unix timestamp) в payload офлайн-заявки. Сейчас его нет; сервер выставит call_date = time() на момент синхронизации — это ломает call_date, alert_level, порядок истории и отчёты. Парсить timestamp из offline_uuid — хрупко.
+□ Решить по notify_status/notify_date в офлайн-пачке: поддерживать или явно зафиксировать, что офлайн-уведомления не поддерживаются.
+□ Пересмотреть атомарность «всё или ничего»: при битом тикете вся пачка отклоняется и ретраится вечно (poison pill). Рассмотреть per-ticket статусы (created/duplicate/error) в ответе.
+3.4. Валидация адресов и fullAddress
+□ Сервер собирает fullAddress из актуальных имён. Клиентский fullAddress — fallback.
+□ Рассмотреть два поля: клиентский снимок и серверный авторитетный снимок (для аудита).
+□ Политика при недоступности Address Service при создании заявки: принимать с флагом «адрес не подтверждён» и логировать, не блокировать аварийную заявку.
+3.5. Массовые привязки групп
+□ В протоколе нет эндпоинтов для массовой привязки/отвязки лифтов по улице/дому/городу. Решить: это в этом SPA или отдельная админка.
+□ Если здесь — добавить get_lifts_by_address, bind_lifts_to_group, unbind_lifts_from_group (или аналог).
+3.6. Справочники
+□ staff_list в config не имеет is_active. Уволенный механик: старые тикеты должны резолвить имя. Либо staff_list включает неактивных с флагом, либо сервер резолвит имя из lift_users независимо от staff_list.
+□ Аналогично для group/department/request: soft delete + is_active, резолв на чтении.
+3.7. Права
+□ config.user_permissions сейчас: role + три can_* + closureallowed на тикет. Для будущего нужен расширяемый permissions-объект (матрица прав на поля и операции). Не блокер, но PermissionService проектировать с запасом.
+3.8. Безопасность check_org_key/get_org_users
+□ get_org_users неаутентифицирован и отдаёт список пользователей с user_id любому, кто знает org_key. Приемлемо, т.к. org_key — не секрет, но зафиксировать rate limiting и минимальный набор полей.
+4. Открытые вопросы (требуют решения в новом чате)
+4.1. Address Service
+Точный контракт центрального Address Service: batch-резолв ID → имена, глобальная версия имён (одна или по сущностям: город/улица/дом), deprecated/terminated флаги. Версионирование.
+
+Глобальная версия имён — одна на всё или по сущностям? Если одна, переименование улицы в другом городе поднимет версию у всех. При 4000 лифтах терпимо, но шумно. Если по сущностям — тенантский бэкенд считает max по используемым ID, точнее, но сложнее.
+
+Кэш имён на тенантском бэкенде: TTL, инвалидация, batch-размер.
+
+Политика деградации при недоступности Address Service: создание заявки с флагом «не подтверждён», асинхронная сверка, логирование.
+
+4.2. Версия адресов
+Scope версии: per-org или per-user. Если loadAddress фильтруется по правам — per-user. Если all-org — per-org.
+
+Ключ кэша IndexedDB: per-user или per-org. При org_key — per-org (компьютер диспетчера).
+
+Поведение при logout: кэш не очищается. Нужно ли очищать при смене org_key? При смене пользователя на том же устройстве?
+
+Механизм доставки версии: notifications.versions (polling 120 сек) + loadAddress.version на старте. Достаточно ли, или нужен отдельный лёгкий endpoint версии?
+
+4.3. Terminated/deprecated в UI
+Как UI получает информацию о расторжении договора по terminated лифту? Новый action, флаг в отчёте, отдельный endpoint?
+
+«Полный поиск, включая удалённые лифты» — это отдельный action или флаг в существующих open/close? Как ограничиваются права на такой поиск?
+
+Deprecated дом, на который ссылается terminated лифт: остаётся в системе, но не в loadAddress. Достаточно ли для ссылочной целостности?
+
+4.4. Offline
+created_at в callNewOffline — добавляем?
+
+notify_status/notify_date в офлайн-пачке — поддерживаем или фиксируем «нет»?
+
+Атомарность пачки: оставляем «всё или ничего» или переходим на per-ticket статусы? Poison pill риск.
+
+Офлайн-заявки со ссылкой на deprecated/terminated ID: принимаем с логированием, не блокируем? Помечаем «адрес требует проверки»?
+
+Как долго можно работать офлайн без обновления справочника? Нужен ли address_version в офлайн-заявке?
+
+4.5. Группы и права
+Массовые привязки групп: в этом SPA или отдельная админка? Если здесь — протокол дополнить.
+
+PermissionService: матрица прав на будущее. Какие сущности и операции? Как хранить (JSON в lift_users или отдельная таблица)?
+
+Роль reserved — что это, какие права, когда активируется?
+
+4.6. Справочники
+staff_list: включать неактивных с is_active: false или резолвить имя на сервере независимо?
+
+group/department/request: soft delete + is_active. Кто и как помечает неактивными? Влияет ли на открытые заявки?
+
+Переименование группы/отдела/типа: старые заявки показывают новое имя (резолв на чтении) — подтвердить, что это ок.
+
+4.7. Безопасность и эксплуатация
+get_org_users: rate limiting, минимальный набор полей. org_key — не секрет, но список пользователей всё равно утечка. Достаточно ли?
+
+Аудит действий: кто создал/изменил/закрыл заявку, кто менял настройки и группы. Где хранить?
+
+Миграции Tenant DB: версия схемы, порядок, откат, новые организации, существующие организации.
+
+Изоляция тенантов: тесты, что запрос одного тенанта не читает данные другого.
+
+Минимальные права DB-пользователей для Master и Tenant.
+
+Бэкапы Master и каждой Tenant DB, восстановление, тестовый тенант.
+
+Мониторинг ошибок по тенантам, healthcheck, алерты при недоступности Tenant DB.
+
+4.8. Аутентификация (для AuthService, Этап 1)
+Точный сценарий логина: org_key + логин + пароль? Как работает loginById и datalist без утечки пользователей?
+
+Токены: JWT или opaque? Время жизни access/refresh, ротация refresh, отзыв при logout, logout со всех устройств.
+
+Refresh-cookie: HttpOnly, Secure, SameSite, домен/путь, CSRF. Несколько организаций в одном браузере?
+
+device_fingerprint в refresh-токенах: стабильность, смена браузера/устройства.
+
+Зачем в lift_users есть user_token_expires_at/user_token_created_at, если есть lift_refresh_tokens? Дублирование или осознанное решение?
+
+Пароли: алгоритм, политика, блокировки, rate limiting, аудит входов.
+
+Роли и матрица прав для administrator, dispatcher, engineer, guest, reserved.
+
+4.9. TicketService (Этап 2)
+Ключ дедупликации «лифт + тип + отдел» только для call_status = 0. Что считать открытой заявкой? Бывают ли «в работе», «приостановлена», «переоткрыта»?
+
+Конкурентное создание двух одинаковых заявок: уникальный индекс/блокировка или merge постфактум?
+
+Merge дописывает call_details. Риск бесконечного роста и потери структуры. Когда писать в lift_history, а когда в call_details?
+
+offline_uuid уникален в пределах Tenant DB. Что если один UUID от разных пользователей/устройств? Что возвращать при повторе?
+
+expected_repair_time: обязательное поле? Как считается?
+
+4.10. Spult/XML (Этап 3)
+Spult только создаёт заявки или также присылает обновления/закрытия? Если только создаёт — как закрываются заявки Spult?
+
+Аутентификация XML: IP allowlist, токен, подпись, basic auth?
+
+Spult идентифицирует лифт через lkds_domain_id и lift_lkds_bindings. Что если привязки нет — только лог, но кому и как сообщать?
+
+Сохранять «сырой» XML/ошибку для ручного разбора? Где и сколько хранить?
+
+Проходит ли Spult-запрос те же права/дедупликацию, что SPA? Кто автор заявки и user_id?
+
+lift_lkds_bindings: один global_object_id — одна привязка к Spult? Уникальность по lkds_domain_id есть, по global_object_id — нет. Осознанно?
+
+5. Чек-лист бэкенда (обновлённый)
+Этап 1: Ядро и подключения
+□ PDODB.php: пул подключений (Master + Tenant), lazy connect, persistent PDO, singleton на запрос, два соединения.
+□ OrgManager.php: по org_key находит реквизиты в Master DB, инициализирует Tenant DB. Кэш реквизитов? Шифрование паролей?
+□ AuthService.php: генерация токенов, проверка паролей, refresh-куки. Решить вопросы 30–36.
+□ Центральный Address Service: контракт batch-резолва имён + глобальная версия. Версионирование.
 Этап 2: Сервисы логики
-
-□ Создать TicketService.php:
-Логика createOrMerge (дедупликация по лифту+типу+отделу, запись дублей в call_details).
-
-Поддержка offline_uuid для идемпотентности офлайн-пачек.
-
-Транзакции для пачек.
-
-□ Создать PermissionService.php (проверка прав на основе групп: какие лифты видит инженер).
-□ Создать GroupService.php (логика наследования групп: улица -> дом -> лифт).
+□ TicketService.php: createOrMerge (дедупликация по лифту+типу+отделу, дубли в call_details), offline_uuid, транзакции для пачек. Решить вопросы 37–41.
+□ PermissionService.php: проверка прав на основе групп (какие лифты видит инженер). Проектировать с запасом под будущую матрицу прав.
+□ GroupService.php: привязка лифт → группы (не наследование улица→дом→лифт; лифт хранит свои группы). Массовые операции по улице/дому/городу.
+□ AddressService (тенантский): сборка loadAddress из локальных лифтов + batch-резолв имён + tenant-aware версия.
 Этап 3: Эндпоинты (API)
-
-□ Написать auth.php (login, refresh, logout, validate).
-□ Написать api.php (замена test_calls.php): open, close, callnew, callNewOffline, calledit, callClose, callnote, get_user_settings, save_user_settings, check_org_key, get_org_users.
-□ Переписать xml.php (Spult) с использованием TicketService.
+□ auth.php: login, refresh, logout, validate.
+□ api.php: open, close, callnew, callNewOffline, calledit, callClose, callnote, get_user_settings, save_user_settings, check_org_key, get_org_users, loadAddress, notifications.
+□ Новые actions (после решения): исторический поиск по удалённым лифтам, массовые привязки групп (если в этом SPA).
+□ xml.php (Spult): переписать с использованием TicketService. Решить вопросы 42–47.
 Этап 4: Миграции БД
+□ offline_uuid в lift_calls (UNIQUE).
+□ Поля профиля и user_role в lift_users.
+□ lift_refresh_tokens.
+□ lift_organizations (Master).
+□ lift_lkds_bindings.
+□ lift_groups, lift_group_objects (или lift_group_bindings — уточнить модель: лифт хранит группы).
+□ is_active для lift_object, lift_home, lift_street, lift_city (soft delete).
+□ is_active для group/department/request/staff (soft delete справочников).
+□ Поля для истории/аудита (если решим — вопрос 24).
+□ Механизм версий схемы Tenant DB для миграций.
+Этап 5: Изменения в API_PROTOCOL.md (v4.1)
+□ Все пункты раздела 3 выше.
+6. Что приложить в новый чат
+Обязательно:
 
-□ Написать SQL-миграции: offline_uuid в lift_calls, поля профиля и user_role в lift_users, таблицы lift_refresh_tokens, lift_organizations, lift_lkds_bindings, lift_groups.
-📂 Файлы для прикрепления в новом чате
-Фронтенд (для контекста):
+Этот HANDOFF.
 
-js/main.js
+API_PROTOCOL.md (v4.0).
 
-js/api-service.js
+AUTH_PROTOCOL.md, OFFLINE_PROTOCOL.md, TECHNICAL_DEBT.md (если есть).
 
-js/login-controller.js
+Фронт: js/main.js, js/api-service.js, js/login-controller.js, js/settings-controller.js, js/profile-controller.js.
 
-js/settings-controller.js
+Бэкенд: PDODB.php, PDOIterator.php, PDOLog.php, xml.php, 10_0_0_3.sql.
 
-js/profile-controller.js
+Желательно:
 
-Бэкенд (текущая реализация):
+Пример реального loadAddress ответа с текущего фронта.
 
-PDODB.php (исправленная версия для PHP 8.3+)
+Схема текущих таблиц lift_calls, lift_users, lift_history, lift_notes, lift_groups, lift_group_objects.
 
-PDOIterator.php
+Пример XML от Spult.
 
-PDOLog.php
+7. Рекомендуемый порядок работы в новом чате
+Закрыть вопросы раздела 4.8 (аутентификация) — они блокируют AuthService и Этап 1.
 
-xml.php (старый файл Spult для понимания интеграции)
+Закрыть вопросы раздела 4.2 (версия адресов) и 4.1 (Address Service) — они блокируют loadAddress и контракт с фронтом.
 
-10_0_0_3.sql (дамп текущей БД)
+Закрыть вопросы раздела 4.4 (offline) — они блокируют callNewOffline и TicketService.
 
-Задача для нового чата: Начать с Этапа 1 — написать OrgManager.php и адаптировать PDODB.php под два подключения. После этого перейти к AuthService.php.
+Закрыть вопросы раздела 4.5–4.6 (группы, справочники, права) — они блокируют PermissionService и GroupService.
 
-Если всё готово, можешь создавать новый чат и прикреплять туда эти файлы! Если нужно что-то еще добавить в хендофф — пиши.
+Закрыть вопросы раздела 4.10 (Spult) — они блокируют xml.php.
 
-Часть 1: SQL-схемы (Необходимые изменения и таблицы)
-1. Master DB (Глобальная база)
-Здесь только одна новая таблица для управления организациями:
+После этого — писать OrgManager.php → AuthService.php → TicketService.php → PermissionService.php/GroupService.php → AddressService → API-эндпоинты → миграции.
 
-sql
-CREATE TABLE `lift_organizations` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `org_key` VARCHAR(50) NOT NULL UNIQUE COMMENT 'Ключ для входа на устройстве',
-  `org_name` VARCHAR(255) NOT NULL,
-  `db_host` VARCHAR(100) NOT NULL,
-  `db_name` VARCHAR(100) NOT NULL,
-  `db_user` VARCHAR(100) NOT NULL,
-  `db_password` VARCHAR(255) NOT NULL,
-  `is_active` TINYINT(1) DEFAULT 1
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-2. Tenant DB (База организации)
-Добавляем недостающие поля и таблицы в ту базу, дамп которой ты присылал.
+Параллельно — обновлять API_PROTOCOL.md до v4.1 по разделу 3.
 
-Для таблицы lift_calls (защита от дублей):
+8. Ключевые принципы (не потерять при переносе)
+ID immutable, не переиспользуются, не удаляются. Soft delete везде.
 
-sql
-ALTER TABLE `lift_calls` 
-ADD COLUMN `offline_uuid` VARCHAR(64) NULL DEFAULT NULL COMMENT 'UUID офлайн-заявки',
-ADD UNIQUE INDEX `idx_offline_uuid` (`offline_uuid`);
-Для таблицы lift_users (Профиль, роль, токены, настройки):
+Снимок адреса в заявке не переписывается. Сервер собирает авторитетный снимок; клиентский — fallback.
 
-sql
-ALTER TABLE `lift_users` 
-ADD COLUMN `user_role` VARCHAR(30) NOT NULL DEFAULT 'dispatcher' COMMENT 'administrator, dispatcher, engineer, guest',
-ADD COLUMN `user_surname` VARCHAR(100) NOT NULL DEFAULT '',
-ADD COLUMN `user_patronymic` VARCHAR(100) NOT NULL DEFAULT '',
-ADD COLUMN `user_column_settings` TEXT NULL DEFAULT NULL COMMENT 'JSON настройки таблицы',
-ADD COLUMN `user_token_expires_at` DATETIME NULL,
-ADD COLUMN `user_token_created_at` DATETIME NULL;
-Таблица для Refresh-токенов (httpOnly cookie):
+Отчёты по ID, не по тексту. По дому — best-effort по текущей привязке; по лифту — всегда.
 
-sql
-CREATE TABLE `lift_refresh_tokens` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `user_id` INT NOT NULL,
-  `token_hash` CHAR(64) NOT NULL UNIQUE,
-  `device_fingerprint` TEXT NOT NULL,
-  `expires_at` DATETIME NOT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `last_used_at` DATETIME NULL,
-  FOREIGN KEY (`user_id`) REFERENCES `lift_users`(`user_id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-Таблица привязки к Spult LKDS:
+Address Service — резолвер имён, не сборщик списка. Список собирает тенантский бэкенд.
 
-sql
-CREATE TABLE `lift_lkds_bindings` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `global_object_id` INT NOT NULL COMMENT 'ID лифта из Master DB',
-  `lkds_domain_id` INT NOT NULL COMMENT 'ID из программы Spult',
-  `lkds_lift_name` VARCHAR(255) NULL,
-  UNIQUE KEY `uq_lkds` (`lkds_domain_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-Часть 2: Код TicketService.php
-Этот сервис использует PDODB и реализует ту самую логику бизнес-дублей, о которой мы договаривались.
+Версия адресов tenant-aware, считает тенантский бэкенд. Доставка через notifications.versions + loadAddress.version.
 
-php
-<?php
-declare(strict_types=1);
+Лифт хранит привязку к группам, привязка жёсткая и актуальная, история не нужна.
 
-namespace mainSRC\services;
+Справочники — резолв на чтении, soft delete. Адреса — снимок.
 
-use mainSRC\dataBase\PDODB;
-use Exception;
+org_key — не секрет, но авторизация обязательна для остальных данных.
 
-class TicketService
-{
-    private PDODB $db;
+Аварийную заявку не блокируем при недоступности Address Service — принимаем с флагом.
 
-    public function __construct()
-    {
-        // Предполагается, что PDODB настроен на текущую Tenant DB
-        $this->db = PDODB::getInstance();
-    }
-
-    /**
-     * Создает новую заявку или объединяет с существующей.
-     * 
-     * @param array $data Нормализованные данные от SPA или Spult
-     * @return int ID созданной или обновленной заявки (call_id)
-     * @throws Exception
-     */
-    public function createOrMerge(array $data): int
-    {
-        // 1. Защита от повторной синхронизации офлайн-пачки (Идемпотентность)
-        if (!empty($data['offline_uuid'])) {
-            $alreadyExists = $this->db->single(
-                "SELECT call_id FROM lift_calls WHERE offline_uuid = :uuid",
-                ['uuid' => $data['offline_uuid']]
-            );
-            if ($alreadyExists) {
-                return (int)$alreadyExists; // Молча возвращаем ID, заявка уже создана
-            }
-        }
-
-        // 2. Поиск бизнес-дубля (Лифт + Тип неисправности + Отдел)
-        // call_status = 0 означает, что заявка открыта
-        $existing = $this->db->row(
-            "SELECT call_id, call_details FROM lift_calls 
-             WHERE call_status = 0 
-               AND address_lift = :lift_id 
-               AND call_request = :req_id 
-               AND call_department = :dept_id 
-             LIMIT 1",
-            [
-                'lift_id' => $data['object_id'],
-                'req_id'  => $data['request_id'],
-                'dept_id' => $data['department_id']
-            ]
-        );
-
-        if ($existing) {
-            // 3. Нашли дубль — дописываем текст в существующее описание
-            $dateStr = date('d.m.Y H:i');
-            $author = $data['author_name'] ?? 'Система';
-            $source = $data['source'] ?? 'API'; // 'SPA', 'Offline', 'Spult'
-            
-            $newDetails = $existing['call_details'] 
-                . "\n\n--- [Дубль от {$dateStr} | Источник: {$source} | Автор: {$author}]: \n" 
-                . $data['details'];
-
-            $this->db->update('lift_calls', 
-                ['call_details' => $newDetails], 
-                ['call_id' => $existing['call_id']]
-            );
-
-            return (int)$existing['call_id'];
-        }
-
-        // 4. Дубля нет — создаем новую заявку (Маппинг API -> Legacy DB)
-        $insertData = [
-            'offline_uuid'         => $data['offline_uuid'] ?? null,
-            'call_status'          => 0, // 0 = открыта
-            'call_date'            => time(),
-            'call_first_name'      => $data['author_name'] ?? 'API',
-            'call_department'      => $data['department_id'],
-            'call_request'         => $data['request_id'],
-            'call_group'           => $data['group_id'],
-            'call_adres'           => $data['fullAddress'],
-            'call_details'         => $data['details'],
-            'call_solution'        => '',
-            'call_user'            => $data['user_id'] ?? 0,
-            'call_staff'           => $data['staff_id'] ?? 0,
-            'address_city'         => $data['city_id'],
-            'address_street'       => $data['street_id'],
-            'address_home'         => $data['home_id'],
-            'address_lift'         => $data['object_id'],
-            'expected_repair_time' => $data['repair_time']
-        ];
-
-        return (int)$this->db->insert('lift_calls', $insertData);
-    }
-
-    /**
-     * Добавление комментария (заметки) к заявке.
-     */
-    public function addNote(int $callId, string $noteText, int $userId, string $userName): bool
-    {
-        $this->db->beginTransaction();
-        try {
-            // 1. Вставляем заметку в таблицу lift_notes
-            $this->db->insert('lift_notes', [
-                'note_title'     => 'Комментарий',
-                'note_body'      => $noteText,
-                'note_relation'  => $callId,
-                'note_type'      => 1, // Тип: обычный комментарий
-                'note_post_date' => time(),
-                'note_post_user' => $userId
-            ]);
-
-            // 2. Пишем в историю заявки
-            $historyText = "{$userName} добавил(а) комментарий: " . mb_substr($noteText, 0, 100) . "...";
-            $this->db->insert('lift_history', [
-                'history_date' => time(),
-                'history_info' => $historyText,
-                'call_id'      => $callId
-            ]);
-
-            $this->db->commit();
-            return true;
-        } catch (Exception $e) {
-            $this->db->rollBack();
-            throw $e;
-        }
-    }
-}
-💡 Как это работает в контексте архитектуры:
-В api.php (или test_calls.php) при получении запроса callnew ты просто создаешь экземпляр new TicketService() и вызываешь createOrMerge($input).
-
-Если это пачка офлайн-заявок (callNewOffline), ты оборачиваешь вызовы createOrMerge в цикл внутри $db->beginTransaction() и $db->commit(). Если хотя бы одна упадет с ошибкой — rollBack() отменит всю пачку.
-
-Для Spult в xml.php ты тоже вызываешь createOrMerge(), но передаешь source = 'Spult'. Если Spult пришлет ту же аварию, что уже висит в SPA, сервис просто допишет данные диагностики в описание, а не создаст вторую заявку.
-
+PermissionService — с запасом под будущую матрицу прав.
