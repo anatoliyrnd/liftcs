@@ -1,0 +1,103 @@
+import { openDB } from "../js/vendor/idb.js"; // Твой файл idb.js
+
+class OfflineDB {
+  constructor() {
+    this.dbPromise = openDB("LiftMechanicDB", 1, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains("config")) {
+          db.createObjectStore("config", { keyPath: "key" });
+        }
+        // Кэш открытых заявок
+        if (!db.objectStoreNames.contains("tickets_cache")) {
+          db.createObjectStore("tickets_cache", { keyPath: "id" });
+        }
+        // Кэш задач от руководителя
+        if (!db.objectStoreNames.contains("tasks_cache")) {
+          db.createObjectStore("tasks_cache", { keyPath: "id" });
+        }
+        // Очередь офлайн-действий (принять, закрыть, коммент)
+        if (!db.objectStoreNames.contains("sync_queue")) {
+          db.createObjectStore("sync_queue", { keyPath: "uuid" });
+        }
+      },
+    });
+  }
+
+  // --- НАСТРОЙКИ ---
+  async setConfig(key, value) {
+    const db = await this.dbPromise;
+    await db.put("config", { key, value });
+  }
+
+  async getConfig(key) {
+    const db = await this.dbPromise;
+    const res = await db.get("config", key);
+    return res ? res.value : null;
+  }
+
+  // --- СПИСКИ ЗАЯВОК И ЗАДАЧ ---
+  async saveList(type, items) {
+    // type = 'tickets' | 'tasks'
+    const db = await this.dbPromise;
+    const storeName = type === "tasks" ? "tasks_cache" : "tickets_cache";
+    const tx = db.transaction(storeName, "readwrite");
+    const store = tx.objectStore(storeName);
+
+    await store.clear(); // Полностью заменяем старый кэш
+    for (const item of items) {
+      await store.put(item);
+    }
+    await tx.done;
+  }
+
+  async getList(type) {
+    const db = await this.dbPromise;
+    const storeName = type === "tasks" ? "tasks_cache" : "tickets_cache";
+    return await db.getAll(storeName);
+  }
+
+  // --- ОЧЕРЕДЬ ДЕЙСТВИЙ (SYNC QUEUE) ---
+  async addToQueue(action) {
+    const db = await this.dbPromise;
+    // Генерируем уникальный ID для действия, если его нет
+    if (!action.uuid) {
+      action.uuid =
+        "act_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+    }
+    action.timestamp = Math.floor(Date.now() / 1000);
+    await db.put("sync_queue", action);
+  }
+
+  async getQueue() {
+    const db = await this.dbPromise;
+    return await db.getAll("sync_queue");
+  }
+
+  async removeFromQueue(uuids) {
+    const db = await this.dbPromise;
+    const tx = db.transaction("sync_queue", "readwrite");
+    for (const id of uuids) {
+      await tx.objectStore("sync_queue").delete(id);
+    }
+    await tx.done;
+  }
+
+  async clearQueue() {
+    const db = await this.dbPromise;
+    await db.clear("sync_queue");
+  }
+  async removeTicket(id) {
+    const db = await this.dbPromise;
+    await db.delete("tickets_cache", Number(id)); // Или String(id), в зависимости от типа
+  }
+  // --- ПОЛНАЯ ОЧИСТКА (При выходе или двойном предупреждении) ---
+  async clearAll() {
+    const db = await this.dbPromise;
+    await db.clear("tickets_cache");
+    await db.clear("tasks_cache");
+    await db.clear("sync_queue");
+    await db.clear("config");
+  }
+}
+
+export const offlineDB = new OfflineDB();
