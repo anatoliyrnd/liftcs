@@ -1,12 +1,54 @@
 <?php
-/**
- * test_calls.php — Локальный прокси с заглушками для тестирования
- */
-
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Настройки CORS
+// ============================================================
+// БЛОК ОТЛАДКИ (с защитой от переполнения)
+// ============================================================
+$debugLog = __DIR__ . '/debug_log.txt';
+$incoming = file_get_contents('php://input');
+
+// Если лог существует и весит больше 2 Мегабайт — очищаем его
+if (file_exists($debugLog) && filesize($debugLog) > 2 * 1024 * 1024) {
+    file_put_contents($debugLog, ""); 
+}
+// Записываем запрос
+file_put_contents($debugLog, date('Y-m-d H:i:s') . " ВХОДЯЩИЙ ЗАПРОС:\n" . $incoming . "\n-------------------\n", FILE_APPEND);
+
+
+// ============================================================
+// ФУНКЦИЯ КОНВЕРТАЦИИ ДАТ В UNIX TIMESTAMP
+// ============================================================
+function convertDatesToUnix(&$data) {
+    // Только массивы, объекты игнорируем, чтобы не ломать структуру
+    if (!is_array($data)) return;
+
+    // Жестко задаем поля, где точно лежат даты (и не трогаем текст в истории)
+    static $dateKeys = [
+        'date', 'close_date', 'repair_time', 'notify_date', 
+        'notify_date2', 'notify_date3'
+    ];
+
+    foreach ($data as $key => &$value) {
+        if (is_array($value)) {
+            convertDatesToUnix($value); // Рекурсия для вложенных массивов (например, note)
+        } elseif (is_string($value) && in_array($key, $dateKeys, true)) {
+            // Приводим форматы к стандартному: 
+            // 22/10/2026 14:07 -> 22.10.2026 14:07
+            // 22.10.2026@14:08 -> 22.10.2026 14:08
+            $normalized = str_replace(['/', '@'], ['.', ' '], $value);
+            $timestamp = strtotime($normalized);
+            
+            if ($timestamp !== false && $timestamp > 0) {
+                $value = $timestamp; // Заменяем строку на целое число (Unix time)
+            }
+        }
+    }
+}
+
+// ============================================================
+// НАСТРОЙКИ CORS
+// ============================================================
 header('Access-Control-Allow-Origin: http://lift.local');
 header('Access-Control-Allow-Credentials: true');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
@@ -25,8 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $rawBody = file_get_contents('php://input');
 $input = json_decode($rawBody, true);
+
 // ============================================================
-// 0. НОВЫЕ ЗАГЛУШКИ: Ключ организации и список юзеров
+// 0. НОВЫЕ ЗАГЛУШКИ
 // ============================================================
 if (isset($input['data']) && $input['data'] === 'check_org_key') {
     $key = $input['org_key'] ?? '';
@@ -39,7 +82,6 @@ if (isset($input['data']) && $input['data'] === 'check_org_key') {
 }
 
 if (isset($input['data']) && $input['data'] === 'get_org_users') {
-    // В реальности здесь была бы проверка org_key из $input['org_key']
     echo json_encode([
         'status' => 'ok',
         'users' => [
@@ -52,6 +94,7 @@ if (isset($input['data']) && $input['data'] === 'get_org_users') {
     ]);
     exit;
 }
+
 // ============================================================
 // 1. ЗАГЛУШКА: Адреса
 // ============================================================
@@ -65,20 +108,16 @@ if (isset($input['data']) && $input['data'] === 'loadAddress') {
 }
 
 // ============================================================
-// 2. ЗАГЛУШКА: Личный кабинет (Настройки)
+// 2. ЗАГЛУШКА: Личный кабинет
 // ============================================================
 $profileFile = __DIR__ . '/mock_profile.json';
 
-// Загрузка настроек
 if (isset($input['data']) && $input['data'] === 'get_user_settings') {
     $defaultProfile = [
         "status" => "ok",
         "profile" => [
-            "id" => 1,
-            "surname" => "Иванов",
-            "name" => "Иван",
-            "patronymic" => "Иванович",
-            "role" => "administrator"
+            "id" => 1, "surname" => "Иванов", "name" => "Иван", 
+            "patronymic" => "Иванович", "role" => "administrator"
         ],
         "column_settings" => [
             "order" => ["id", "address", "details", "staff_name", "notify_status", "department", "date", "repair_time"],
@@ -97,7 +136,6 @@ if (isset($input['data']) && $input['data'] === 'get_user_settings') {
     exit;
 }
 
-// Сохранение настроек
 if (isset($input['action']) && $input['action'] === 'save_user_settings') {
     file_put_contents($profileFile, json_encode($input, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
     echo json_encode(['status' => 'ok', 'message' => 'Mock: Настройки профиля и таблицы сохранены.']);
@@ -109,16 +147,13 @@ if (isset($input['action']) && $input['action'] === 'save_user_settings') {
 // ============================================================
 $mockFile = __DIR__ . '/mock_tickets.json';
 
-function getMockTickets($file)
-{
-    if (!file_exists($file))
-        return [];
+function getMockTickets($file) {
+    if (!file_exists($file)) return [];
     $data = json_decode(file_get_contents($file), true);
     return is_array($data) ? $data : [];
 }
 
-function saveMockTicket($file, $ticketData, $authorName = null)
-{
+function saveMockTicket($file, $ticketData, $authorName = null) {
     $existing = getMockTickets($file);
 
     $ticketData['id'] = rand(100000, 999999);
@@ -126,7 +161,6 @@ function saveMockTicket($file, $ticketData, $authorName = null)
     $ticketData['date'] = time();
     $ticketData['alert_level'] = 1;
     $ticketData['address'] = $ticketData['fullAddress'] ?? '—';
-
     $ticketData['staff_name'] = $ticketData['staff_id'] ? 'Механик ' . $ticketData['staff_id'] : null;
     $ticketData['department'] = 'Mock Отдел';
     $ticketData['request'] = 'Mock Запрос';
@@ -147,14 +181,12 @@ function saveMockTicket($file, $ticketData, $authorName = null)
     file_put_contents($file, json_encode($existing, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 }
 
-// Создание онлайн
 if (isset($input['action']) && $input['action'] === 'callnew') {
     saveMockTicket($mockFile, $input);
     echo json_encode(['status' => 'ok', 'message' => 'Mock: Заявка создана', 'generated_id' => rand(100000, 999999)]);
     exit;
 }
 
-// Создание офлайн-пачки
 if (isset($input['action']) && $input['action'] === 'callNewOffline') {
     $tickets = $input['tickets'] ?? [];
     foreach ($tickets as $ticket) {
@@ -165,14 +197,13 @@ if (isset($input['action']) && $input['action'] === 'callNewOffline') {
     exit;
 }
 
-// Редактирование / Закрытие / Комментарий
 if (isset($input['action']) && in_array($input['action'], ['calledit', 'callClose', 'callnote'])) {
     echo json_encode(['status' => 'ok', 'message' => 'Mock: Действие ' . $input['action'] . ' выполнено']);
     exit;
 }
 
 // ============================================================
-// 4. ЧТЕНИЕ ОТКРЫТЫХ ЗАЯВОК (Слияние реальных и мок)
+// 4. ЧТЕНИЕ ОТКРЫТЫХ ЗАЯВОК
 // ============================================================
 if (isset($input['data']) && $input['data'] === 'open') {
     $realTickets = [];
@@ -183,14 +214,12 @@ if (isset($input['data']) && $input['data'] === 'open') {
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $rawBody);
 
-        // ИСПРАВЛЕНО: Передаем заголовок Authorization!
         $forwardHeaders = ['Content-Type: application/json'];
         $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
         if (!empty($authHeader)) {
             $forwardHeaders[] = 'Authorization: ' . $authHeader;
         }
         curl_setopt($ch, CURLOPT_HTTPHEADER, $forwardHeaders);
-
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         $realResponse = curl_exec($ch);
@@ -198,9 +227,11 @@ if (isset($input['data']) && $input['data'] === 'open') {
 
         $decoded = json_decode($realResponse, true);
 
-        // ИСПРАВЛЕНО: Проверяем, что это действительно массив заявок (а не объект с ошибкой)
-        if (is_array($decoded) && (empty($decoded) || isset($decoded[0]))) {
-            $realTickets = $decoded;
+        if (is_array($decoded)) {
+            convertDatesToUnix($decoded);
+            if (empty($decoded) || isset($decoded[0])) {
+                $realTickets = $decoded;
+            }
         }
     }
 
@@ -212,7 +243,7 @@ if (isset($input['data']) && $input['data'] === 'open') {
 }
 
 // ============================================================
-// 5. ЗАГЛУШКА: Поллинг уведомлений (Чтобы не спамило ошибками)
+// 5. ЗАГЛУШКА: Поллинг уведомлений
 // ============================================================
 if (isset($input['data']) && $input['data'] === 'notifications') {
     echo json_encode([
@@ -225,7 +256,7 @@ if (isset($input['data']) && $input['data'] === 'notifications') {
 }
 
 // ============================================================
-// 6. ПРОКСИ ДЛЯ ВСЕГО ОСТАЛЬНОГО (Включая data: "close")
+// 6. ПРОКСИ ДЛЯ ВСЕГО ОСТАЛЬНОГО
 // ============================================================
 $targetUrl = 'https://sh.e-rcs.ru/test_calls.php';
 $forwardHeaders = ['Content-Type: application/json'];
@@ -252,7 +283,36 @@ if ($curlError) {
     http_response_code(502);
     echo json_encode(['status' => 'error', 'code' => 'proxy_network_error', 'message' => 'Ошибка прокси: ' . $curlError]);
 } else {
-    http_response_code($httpCode);
-    header('Content-Type: application/json; charset=utf-8');
-    echo $response;
+    // Логируем ответ сервера
+    file_put_contents($debugLog, "ОТВЕТ ОТ СЕРВЕРА:\n" . $response . "\n===================\n", FILE_APPEND);
+    
+    if (trim($response) === '') {
+        http_response_code($httpCode);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $decodedResponse = json_decode($response, true);
+    
+    if (json_last_error() === JSON_ERROR_NONE) {
+        if (is_array($decodedResponse)) {
+            convertDatesToUnix($decodedResponse);
+        }
+        
+        // Отдаем фронтенду числа без экранирования слэшей
+        $encoded = json_encode($decodedResponse, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        
+        if ($encoded === false) {
+            $encoded = $response;
+        }
+
+        http_response_code($httpCode);
+        header('Content-Type: application/json; charset=utf-8');
+        echo $encoded;
+    } else {
+        http_response_code($httpCode);
+        header('Content-Type: application/json; charset=utf-8');
+        echo $response;
+    }
 }
