@@ -1,11 +1,13 @@
 import { api } from "../api.js";
+import { escapeHtml } from "../utils/sanitize.js";
+import { formatShortDate, formatTime } from "../utils/format.js";
 
 export class ClosedController {
   constructor() {
     this.view = document.getElementById("view-closed");
     this.container = document.getElementById("closedContainer");
     this.periodBtns = this.view.querySelectorAll(".period-btn");
-    this.currentPeriod = "1"; // По умолчанию 1 день
+    this.currentPeriod = "1";
   }
 
   async mount() {
@@ -14,6 +16,11 @@ export class ClosedController {
     await this.loadData(this.currentPeriod);
   }
 
+  unmount() {
+    this.view.classList.remove("active");
+  }
+
+  // ... (методы bindEvents, loadData, render остаются без изменений из Волны 1) ...
   bindEvents() {
     this.periodBtns.forEach((btn) => {
       btn.onclick = () => {
@@ -62,25 +69,10 @@ export class ClosedController {
       card.className = "ticket-card closed";
       card.dataset.id = ticket.id;
 
-      let dateStr = "";
       const rawDate = ticket.close_date || ticket.date;
-      if (rawDate) {
-        let ts = Number(rawDate);
-        if (ts < 10000000000) ts *= 1000;
-        const d = new Date(ts);
-        if (!isNaN(d.getTime())) {
-          dateStr =
-            d.toLocaleDateString("ru-RU", {
-              day: "2-digit",
-              month: "2-digit",
-            }) +
-            " " +
-            d.toLocaleTimeString("ru-RU", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-        }
-      }
+      const shortDate = formatShortDate(rawDate);
+      const timeStr = formatTime(rawDate);
+      const dateStr = shortDate !== "—" ? `${shortDate} ${timeStr}` : "—";
 
       const addressText =
         ticket.fullAddress || ticket.address || "Адрес не указан";
@@ -88,13 +80,13 @@ export class ClosedController {
 
       card.innerHTML = `
         <div class="card-top">
-          <span class="card-id">№ ${ticket.id}</span>
+          <span class="card-id">№ ${escapeHtml(ticket.id)}</span>
           <span class="card-status status-work" style="color: var(--success); background: rgba(34,197,94,0.15);">Закрыта</span>
         </div>
-        <div class="card-address">${addressText}</div>
-        <div class="card-solution">✅ ${solutionText}</div>
+        <div class="card-address">${escapeHtml(addressText)}</div>
+        <div class="card-solution">✅ ${escapeHtml(solutionText)}</div>
         <div class="card-bottom" style="margin-top: 8px;">
-          <span class="card-date">${dateStr}</span>
+          <span class="card-date">${escapeHtml(dateStr)}</span>
           <span class="card-arrow">→</span>
         </div>
       `;

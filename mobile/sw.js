@@ -1,6 +1,6 @@
-const CACHE_NAME = "lift-mobile-v1";
+// Меняй версию при каждом глобальном обновлении файлов (v2, v3...)
+const CACHE_NAME = "lift-mobile-v2";
 
-// Список файлов, которые нужны для запуска (App Shell)
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",
@@ -13,37 +13,36 @@ const ASSETS_TO_CACHE = [
   "./config.js",
   "./sync-manager.js",
   "./offline-db.js",
-
   "./controllers/list-controller.js",
   "./controllers/card-controller.js",
-
+  "./controllers/closed-controller.js",
+  "./controllers/login-controller.js",
+  "./controllers/profile-controller.js",
   "./components/image-compressor.js",
-  "./components/network-led.js",
+  "./components/ui-modal.js",
   "./components/api-status.js",
   "./utils/webgl-fingerprint.js",
-
-  "../js/vendor/idb.js",
+  "./utils/sanitize.js",
+  "./utils/format.js",
+  "./vendor/idb.js",
 ];
 
-// 1. Установка (кэшируем файлы)
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log("[SW] Кэширование файлов оболочки");
-      // Кэшируем каждый файл отдельно, чтобы падение одного (404) не ломало всё
+      // Кэшируем по одному, чтобы падение одного файла не ломало установку
       return Promise.all(
         ASSETS_TO_CACHE.map((url) => {
-          return cache.add(url).catch((err) => {
-            console.warn("[SW] Не удалось закэшировать:", url, err);
-          });
+          return cache
+            .add(url)
+            .catch((err) => console.warn("[SW] Ошибка кэша:", url));
         }),
       );
     }),
   );
-  self.skipWaiting();
+  self.skipWaiting(); // Активируем новый SW немедленно
 });
 
-// 2. Активация (удаляем старый кэш, если версия изменилась)
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -57,41 +56,40 @@ self.addEventListener("activate", (event) => {
       );
     }),
   );
-  self.clients.claim();
+  self.clients.claim(); // Захватываем контроль над страницами
 });
 
-// 3. Перехват запросов
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Запросы к API (test_calls.php, auth_stub.php) НЕ кэшируем, пускаем напрямую в сеть
+  // Запросы к API (php) не кэшируем вообще
   if (event.request.method !== "GET" || url.pathname.endsWith(".php")) {
     return;
   }
 
-  // Для всех остальных файлов (HTML, CSS, JS): Сначала ищем в кэше, если нет — идем в сеть
+  // Стратегия Network First для всего остального (HTML, JS, CSS)
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request)
-        .then((response) => {
-          // Если скачали успешно — обновляем кэш
-          if (response && response.status === 200) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return response;
-        })
-        .catch(() => {
-          // Если сети нет и файла нет в кэше, а запрос на HTML-страницу — отдаем index.html
+    fetch(event.request)
+      .then((response) => {
+        // Если сеть ответила успешно — обновляем кэш
+        if (response && response.status === 200) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return response;
+      })
+      .catch(() => {
+        // Если сети нет — достаем из кэша
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
+
+          // Если это запрос на переход по ссылке (навигация), отдаем index.html
           if (event.request.mode === "navigate") {
             return caches.match("./index.html");
           }
         });
-    }),
+      }),
   );
 });

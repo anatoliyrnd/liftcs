@@ -10,7 +10,7 @@
  */
 import { API, AUTH } from "./config.js";
 import { authStore } from "./auth-store.js";
-import { networkLed } from "./components/network-led.js";
+
 import { apiStatus } from "./components/api-status.js";
 import { getWebGLFingerprint } from "./utils/webgl-fingerprint.js";
 
@@ -103,8 +103,6 @@ export class ApiService {
     tag = null,
     skipAuthHandling = false,
   ) {
-    networkLed.requestStarted();
-
     // actionComment === null → silent-запрос: не трогаем статус-бар вообще.
     const showStatus = actionComment !== null && actionComment !== undefined;
     if (showStatus) {
@@ -144,7 +142,6 @@ export class ApiService {
 
       // HTTP-ошибка на уровне сети
       if (!response.ok) {
-        networkLed.reportFailure();
         return {
           status: "error",
           code: "http_" + response.status,
@@ -170,7 +167,6 @@ export class ApiService {
           // Пробуем refresh и retry (только один раз)
           const okRefresh = await this._refreshSession();
           if (okRefresh) {
-            networkLed.reportSuccess();
             // Повтор исходного запроса — уже с новым токеном
             return this._sendPostRequest(
               url,
@@ -180,30 +176,25 @@ export class ApiService {
               true,
             );
           } else {
-            networkLed.reportFailure();
             this._emitAuthLost(code);
             return data;
           }
         }
 
         if (code === "device_mismatch" || code === "user_blocked") {
-          networkLed.reportFailure();
           this._emitAuthLost(code);
           return data;
         }
       }
 
-      networkLed.reportSuccess();
       return data;
     } catch (err) {
       clearTimeout(timeoutId);
 
       if (err.name === "AbortError") {
-        networkLed.reportAborted();
         return { status: "error", code: "aborted", message: "Запрос отменён." };
       }
 
-      networkLed.reportFailure();
       return {
         status: "error",
         code: "network_error",
@@ -213,7 +204,6 @@ export class ApiService {
       if (showStatus) {
         apiStatus.hide();
       }
-      networkLed.requestFinished();
 
       if (tag) {
         const set = this._activeByTag.get(tag);

@@ -1,6 +1,10 @@
-import { api } from "../api.js"; // Твой существующий сервис
+import { api } from "../api.js";
 import { syncManager } from "../sync-manager.js";
 import { offlineDB } from "../offline-db.js";
+import { escapeHtml } from "../utils/sanitize.js";
+import { formatTime } from "../utils/format.js";
+import { ui } from "../components/ui-modal.js";
+import { API } from "../config.js"; // Для TICKETS_REFRESH_MS
 
 export class ListController {
   constructor() {
@@ -9,44 +13,120 @@ export class ListController {
     this.newCountEl = document.getElementById("newTicketsCount");
     this.newBlock = document.getElementById("newTicketsBlock");
     this.acceptAllBtn = document.getElementById("acceptAllBtn");
+    this.view = document.getElementById("view-list");
 
     this.tickets = [];
+
+    // Состояния для Polling
+    this.pollingTimer = null;
+    this._inFlight = false;
+
+    // Биндим контекст для visibilitychange
+    this._onVisibilityChange = this._onVisibilityChange.bind(this);
   }
 
   async mount() {
-    document.getElementById("view-list").classList.add("active");
+    this.view.classList.add("active");
 
-    // Показываем заглушку загрузки
     this.container.innerHTML =
       '<div style="text-align:center; padding: 40px; color: var(--text-muted);">Загрузка заявок...</div>';
 
     await this.loadData();
     this.render();
     this.bindEvents();
+
+    // Запускаем фоновое обновление и слежку за фокусом
+    this.startPolling();
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
+  }
+
+  unmount() {
+    this.stopPolling();
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    this.view.classList.remove("active");
   }
 
   async loadData() {
     try {
-      // 1. Пытаемся получить данные с реального сервера
       const response = await api.post({ data: "open" }, null, "mobile_list");
 
       if (Array.isArray(response)) {
         this.tickets = response;
-        // 2. Сохраняем в кэш для офлайн-режима
         await offlineDB.saveList("tickets", response);
       } else {
         throw new Error("Неверный формат ответа от сервера");
       }
     } catch (e) {
-      // 3. Если сети нет или сервер недоступен — берем из IndexedDB
       console.warn("[ListController] Нет сети, загрузка из кэша...", e);
       this.tickets = await offlineDB.getList("tickets");
     }
   }
+
+  // ==========================================================================
+  // POLLING (Автообновление каждые 5 минут)
+  // ==========================================================================
+  startPolling() {
+    this.stopPolling();
+    this.pollingTimer = setInterval(() => this._poll(), API.TICKETS_REFRESH_MS);
+  }
+
+  stopPolling() {
+    if (this.pollingTimer) clearInterval(this.pollingTimer);
+    this.pollingTimer = null;
+  }
+
+  async _poll(force = false) {
+    // Если не форсировано, проверяем условия
+    if (!force) {
+      if (document.visibilityState !== "visible") return; // Свернуто
+      if (!navigator.onLine) return; // Офлайн
+      if (syncManager.isSyncing) return; // Идет общая синхронизация
+      if (this._inFlight) return; // Уже идет запрос (например, acceptAll)
+    }
+
+    this._inFlight = true;
+    try {
+      // Тихий запрос (без индикатора загрузки)
+      const response = await api.post({ data: "open" }, null);
+
+      if (Array.isArray(response)) {
+        this.tickets = response;
+        await offlineDB.saveList("tickets", response);
+
+        // Сохраняем позицию скролла перед перерисовкой
+        const appContent = document.querySelector(".app-content");
+        const scrollTop = appContent ? appContent.scrollTop : 0;
+
+        this.render();
+
+        // Восстанавливаем скролл
+        if (appContent) appContent.scrollTop = scrollTop;
+      }
+    } catch (e) {
+      console.warn("[ListController] Ошибка фонового обновления", e);
+    } finally {
+      this._inFlight = false;
+    }
+  }
+
+  _onVisibilityChange() {
+    if (document.visibilityState === "visible") {
+      // Пользователь вернулся в приложение — делаем мгновенный refresh
+      // и перезапускаем таймер (чтобы 5 минут отсчитывались заново)
+      this._poll(true);
+      this.startPolling();
+    } else {
+      // Пользователь свернул приложение — останавливаем таймер
+      this.stopPolling();
+    }
+  }
+
+  // ==========================================================================
+  // РЕНДЕР
+  // ==========================================================================
   render() {
     if (!this.container) return;
 
-    // ФИКС 1: Приводим статус к числу и проверяем разные варианты
     const isTicketNew = (status) => {
       const s = Number(status);
       return s === 0 || status === null || status === undefined || isNaN(s);
@@ -81,65 +161,41 @@ export class ListController {
         (b.alert_level === 3 ? 100 : 0) +
         (isTicketNew(b.notify_status) ? 10 : 0);
       if (aWeight !== bWeight) return bWeight - aWeight;
-      return 0; // Убрали сортировку по дате, чтобы не падало на Invalid Date
+      return 0;
     });
 
     sortedTickets.forEach((ticket) => {
       const isNew = isTicketNew(ticket.notify_status);
-
-      // ФИКС 2: Умный парсинг даты
-      let timeString = "—";
-      const rawDate = ticket.date || ticket.call_date;
-      if (rawDate) {
-        let ts = Number(rawDate);
-        if (!isNaN(ts)) {
-          // Если timestamp в секундах (меньше 10 млрд), переводим в миллисекунды
-          if (ts < 10000000000) ts *= 1000;
-          const dateObj = new Date(ts);
-          if (!isNaN(dateObj.getTime())) {
-            timeString = dateObj.toLocaleTimeString("ru-RU", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-          }
-        } else {
-          // Если это уже готовая строка
-          timeString = String(rawDate);
-        }
-      }
+      const timeString = formatTime(ticket.date || ticket.call_date);
 
       const card = document.createElement("div");
       card.className = "ticket-card";
       card.dataset.id = ticket.id;
 
-      if (ticket.alert_level === 3) {
+      if (ticket.alert_level === 3)
         card.style.borderLeftColor = "var(--danger)";
-      } else if (isNew) {
-        card.style.borderLeftColor = "var(--warning)";
-      } else {
-        card.style.borderLeftColor = "var(--success)";
-      }
+      else if (isNew) card.style.borderLeftColor = "var(--warning)";
+      else card.style.borderLeftColor = "var(--success)";
 
-      // ФИКС 3: Проверяем разные поля для адреса
       const addressText =
         ticket.fullAddress || ticket.address || "Адрес не указан";
-
+      const detailsRaw = ticket.details || "Без описания";
       const shortDetails =
-        ticket.details && ticket.details.length > 80
-          ? ticket.details.substring(0, 80) + "..."
-          : ticket.details || "Без описания";
+        detailsRaw.length > 80
+          ? detailsRaw.substring(0, 80) + "..."
+          : detailsRaw;
 
       card.innerHTML = `
                 <div class="card-top">
-                    <span class="card-id">№ ${ticket.id}</span>
+                    <span class="card-id">№ ${escapeHtml(ticket.id)}</span>
                     <span class="card-status ${isNew ? "status-open" : "status-work"}">
                         ${isNew ? "Новая" : "В работе"}
                     </span>
                 </div>
-                <div class="card-address">${addressText}</div>
-                <div class="card-desc">${shortDetails}</div>
+                <div class="card-address">${escapeHtml(addressText)}</div>
+                <div class="card-desc">${escapeHtml(shortDetails)}</div>
                 <div class="card-bottom">
-                    <span class="card-date">${timeString}</span>
+                    <span class="card-date">${escapeHtml(timeString)}</span>
                     <span class="card-arrow">→</span>
                 </div>
             `;
@@ -153,43 +209,42 @@ export class ListController {
   }
 
   bindEvents() {
-    // Обработка кнопки "Принять все"
     this.acceptAllBtn.onclick = async () => {
+      if (this._inFlight) return; // Защита от двойного клика
+
       const newTickets = this.tickets.filter((t) => !t.notify_status);
       if (newTickets.length === 0) return;
 
       if (!confirm(`Принять в работу ${newTickets.length} новых заявок?`))
         return;
 
+      this._inFlight = true; // Блокируем polling на время массового действия
       this.acceptAllBtn.disabled = true;
       this.acceptAllBtn.textContent = "Принятие...";
 
-      let successCount = 0;
+      try {
+        for (const ticket of newTickets) {
+          const action = {
+            payload: {
+              action: "calledit",
+              call_id: ticket.id,
+              notify_status: 2,
+            },
+          };
 
-      for (const ticket of newTickets) {
-        // Формируем payload строго по протоколу v4.0 для calledit
-        const action = {
-          payload: {
-            action: "calledit",
-            call_id: ticket.id,
-            notify_status: 2, // 2 = "Принял через WEB"
-          },
-        };
+          const res = await syncManager.sendActionDirectly(action);
 
-        // syncManager сам сделает 3 попытки, если упадет — сохранит в очередь
-        const res = await syncManager.sendActionDirectly(action);
-
-        if (res && res.status !== "error") {
-          ticket.notify_status = 2; // Обновляем локально
-          successCount++;
+          if (res && res.status !== "error") {
+            ticket.notify_status = 2;
+            await offlineDB.updateTicket(ticket.id, { notify_status: 2 });
+          }
         }
+      } finally {
+        this._inFlight = false;
+        this.acceptAllBtn.disabled = false;
+        this.acceptAllBtn.textContent = "Принять все";
+        this.render();
       }
-
-      this.acceptAllBtn.disabled = false;
-      this.acceptAllBtn.textContent = "Принять все";
-
-      // Перерисовываем (кнопка и бейдж исчезнут)
-      this.render();
     };
   }
 }

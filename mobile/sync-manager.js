@@ -21,7 +21,10 @@ export class SyncManager {
   // Обновление плашки "Онлайн/Офлайн" в шапке
   updateNetworkStatus(status) {
     const el = document.getElementById("networkStatus");
+    if (!el) return;
     const text = el.querySelector(".text");
+    if (!text) return;
+
     el.className = "network-status " + status;
 
     if (status === "online") text.textContent = "Онлайн";
@@ -33,6 +36,13 @@ export class SyncManager {
   // Вызывается при старте приложения или по кнопке "Синхронизировать"
   async startSync() {
     if (this.isSyncing) return;
+
+    // Если сети нет, даже не начинаем синхронизацию
+    if (!navigator.onLine) {
+      this.updateNetworkStatus("offline");
+      return;
+    }
+
     this.isSyncing = true;
     this.updateNetworkStatus("sync");
 
@@ -43,11 +53,23 @@ export class SyncManager {
       // 2. Затем скачиваем свежие списки с сервера
       await this._pullData();
 
-      this.updateNetworkStatus("online");
-      this.retryCount = 0; // Сбрасываем счетчик ошибок при успехе
+      // Проверяем, не отвалилась ли сеть прямо во время запросов
+      if (navigator.onLine) {
+        this.updateNetworkStatus("online");
+        this.retryCount = 0; // Сбрасываем счетчик ошибок при успехе
+      } else {
+        this.updateNetworkStatus("offline");
+      }
     } catch (error) {
       console.error("[SyncManager] Ошибка синхронизации:", error);
-      this.updateNetworkStatus("error");
+
+      // Если ошибка сети — ставим "Нет сети" и планируем ретрай
+      if (error.message === "network_error" || !navigator.onLine) {
+        this.updateNetworkStatus("offline");
+        this._scheduleRetry();
+      } else {
+        this.updateNetworkStatus("error");
+      }
     } finally {
       this.isSyncing = false;
     }
@@ -67,7 +89,7 @@ export class SyncManager {
           throw new Error("network_error");
         }
 
-        // Если сервер ответил (даже если это логическая ошибка 400/500) — связь есть!
+        // Если сервер ответил (даже если это логическая ошибка) — связь есть!
         if (res) {
           this.updateNetworkStatus("online");
           return res;
@@ -85,10 +107,10 @@ export class SyncManager {
     );
     await offlineDB.addToQueue(action);
     this.updateNetworkStatus("offline");
-    return { status: "offline_saved" }; // <--- Возвращаем специальный статус
+    return { status: "offline_saved" };
   }
 
-  // Проход по очереди и отправка пачками (если есть)
+  // Проход по очереди и отправка пачками
   async _processQueue() {
     const queue = await offlineDB.getQueue();
     if (queue.length === 0) return;
@@ -97,13 +119,18 @@ export class SyncManager {
     for (const action of queue) {
       try {
         const res = await api.post(action.payload);
-        if (res && res.status !== "network_error") {
-          // Сервер ответил (даже если это 400 ошибка, мы ее обработали) — удаляем из очереди
-          sentUuids.push(action.uuid);
+
+        // ЖЕЛЕЗОБЕТОННАЯ ПРОВЕРКА: если сеть отвалилась, бросаем исключение
+        // (чтобы не удалить заявку из очереди впустую)
+        if (res && res.status === "error" && res.code === "network_error") {
+          throw new Error("network_error");
         }
+
+        // Сервер ответил — удаляем из очереди
+        sentUuids.push(action.uuid);
       } catch (e) {
-        // Если упало по сети — прерываем цикл, попробуем позже
-        throw new Error("Сеть пропала во время синхронизации очереди");
+        // Прерываем цикл, оставляя неотправленные в очереди
+        throw new Error("network_error");
       }
     }
 
@@ -123,7 +150,7 @@ export class SyncManager {
     if (this.retryTimer) clearTimeout(this.retryTimer);
 
     if (this.retryCount >= this.retryDelays.length) {
-      this.updateNetworkStatus("error"); // Все попытки исчерпаны, ждем кнопки от юзера
+      this.updateNetworkStatus("error"); // Все попытки исчерпаны
       return;
     }
 
@@ -138,21 +165,39 @@ export class SyncManager {
 
   // Скачивание свежих данных с сервера
   async _pullData() {
-    try {
-      // Запрашиваем открытые заявки и задачи
-      const tickets = await api.post({ data: "open" });
-      if (Array.isArray(tickets)) {
-        await offlineDB.saveList("tickets", tickets);
-      }
+    const [ticketsResult, tasksResult] = await Promise.allSettled([
+      api.post({ data: "open" }),
+      api.post({ data: "tasks" }),
+    ]);
 
-      const tasks = await api.post({ data: "tasks" }); // Предполагаем, что такой экшен будет
-      if (Array.isArray(tasks)) {
-        await offlineDB.saveList("tasks", tasks);
-      }
-    } catch (e) {
-      console.warn("Не удалось обновить списки с сервера", e);
+    // Если хотя бы один запрос упал по сети (а не просто вернул логическую ошибку),
+    // выбрасываем исключение, чтобы startSync знал, что мы офлайн
+    if (
+      (ticketsResult.status === "fulfilled" &&
+        ticketsResult.value?.code === "network_error") ||
+      (tasksResult.status === "fulfilled" &&
+        tasksResult.value?.code === "network_error") ||
+      ticketsResult.status === "rejected" ||
+      tasksResult.status === "rejected"
+    ) {
+      throw new Error("network_error");
+    }
+
+    if (
+      ticketsResult.status === "fulfilled" &&
+      Array.isArray(ticketsResult.value)
+    ) {
+      await offlineDB.saveList("tickets", ticketsResult.value);
+    }
+
+    if (
+      tasksResult.status === "fulfilled" &&
+      Array.isArray(tasksResult.value)
+    ) {
+      await offlineDB.saveList("tasks", tasksResult.value);
     }
   }
 }
 
 export const syncManager = new SyncManager();
+s;

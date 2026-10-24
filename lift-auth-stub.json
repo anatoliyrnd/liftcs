@@ -13,24 +13,23 @@
             "expires_at": 1795206755,
             "created_at": 1792614755,
             "last_used_at": null
+        },
+        "4fa022baa1e3e56065108083f9ff53734f980e510ab4aebcb8211532940d097f": {
+            "user_id": 2,
+            "device_fingerprint": "full:WebKit|ANGLE (Intel, Intel(R) HD Graphics (0x000022B1) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+            "expires_at": 1795464325,
+            "created_at": 1792872325,
+            "last_used_at": null
         }
     },
     "access": {
         "2": {
-            "token": "02c96d4bda1a32b76e775259633b108107d70e4b6a06d5bd6a2fd15fdd27efd3",
-            "expires_at": 1792621896,
+            "token": "c5d4b95b7350b99f35378654fd5df5911f90b211e5337df10b37615e81b6bcbf",
+            "expires_at": 1792879525,
             "user_id": 2,
             "user_name": "\u0414\u0438\u0441\u043f\u0435\u0442\u0447\u0435\u0440 \u041f\u0435\u0442\u0440\u043e\u0432\u0430",
             "role": "dispatcher",
-            "webgl_info": "full:WebKit|ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"
-        },
-        "3": {
-            "token": "fea89544eb9053408f5c50c98edd37f5d3c4f8a2b77fd265abe5968284a98882",
-            "expires_at": 1792621955,
-            "user_id": 3,
-            "user_name": "\u0421\u0435\u0440\u0433\u0435\u0435\u043d\u043a\u043e \u0421\u0435\u0440\u0433\u0435\u0439",
-            "role": "engineer",
-            "webgl_info": "full:WebKit|ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"
+            "webgl_info": "full:WebKit|ANGLE (Intel, Intel(R) HD Graphics (0x000022B1) Direct3D11 vs_5_0 ps_5_0, D3D11)"
         }
     }
 }

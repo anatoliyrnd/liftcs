@@ -1,4 +1,4 @@
-import { openDB } from "../js/vendor/idb.js"; // Твой файл idb.js
+import { openDB } from "./vendor/idb.js";
 
 class OfflineDB {
   constructor() {
@@ -89,6 +89,20 @@ class OfflineDB {
   async removeTicket(id) {
     const db = await this.dbPromise;
     await db.delete("tickets_cache", Number(id)); // Или String(id), в зависимости от типа
+  }
+  /**
+   * Точечное обновление заявки в кэше.
+   * Используется для оптимистичной записи после accept/comment.
+   */
+  async updateTicket(id, patch) {
+    const db = await this.dbPromise;
+    const all = await db.getAll("tickets_cache");
+    const target = all.find((t) => String(t.id) === String(id));
+    if (!target) return false;
+    const tx = db.transaction("tickets_cache", "readwrite");
+    await tx.objectStore("tickets_cache").put({ ...target, ...patch });
+    await tx.done;
+    return true;
   }
   // --- ПОЛНАЯ ОЧИСТКА (При выходе или двойном предупреждении) ---
   async clearAll() {
