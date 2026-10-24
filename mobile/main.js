@@ -2,17 +2,15 @@ import { ListController } from "./controllers/list-controller.js";
 import { CardController } from "./controllers/card-controller.js";
 import { LoginController } from "./controllers/login-controller.js";
 import { ClosedController } from "./controllers/closed-controller.js";
-import { ProfileController } from "./controllers/profile-controller.js"; // <-- ДОБАВЛЕНО
+import { ProfileController } from "./controllers/profile-controller.js";
 import { syncManager } from "./sync-manager.js";
-import { api } from "./api.js";
 import { authStore } from "./auth-store.js";
-import { offlineDB } from "./offline-db.js";
 
 const closedController = new ClosedController();
 const listController = new ListController();
 const cardController = new CardController();
 const loginController = new LoginController();
-const profileController = new ProfileController(); // <-- ДОБАВЛЕНО
+const profileController = new ProfileController();
 
 function updateBottomNav(route) {
   document.querySelectorAll(".nav-item").forEach((el) => {
@@ -48,17 +46,12 @@ async function handleRoute() {
     return;
   }
 
-  // 2. Очистка предыдущих экранов (unmount)
-
-  if (hash !== "#/detail" && !hash.startsWith("#/detail/"))
-    cardController.unmount();
-  if (hash !== "#/profile") profileController.unmount();
-  if (hash !== "#/list") listController.unmount(); // <-- ДОБАВИТЬ
-  if (hash !== "#/closed") closedController.unmount(); // <-- ДОБАВИТЬ
-  // Вызываем unmount у всех, кроме текущего. Это отменит висящие запросы карточки.
-  if (hash !== "#/detail" && !hash.startsWith("#/detail/"))
-    cardController.unmount();
-  if (hash !== "#/profile") profileController.unmount();
+  // 2. Очистка ВСЕХ экранов (безопасно вызывать всегда)
+  cardController.unmount();
+  profileController.unmount();
+  listController.unmount();
+  closedController.unmount();
+  loginController.unmount();
 
   document
     .querySelectorAll(".view")
@@ -92,7 +85,7 @@ async function handleRoute() {
       }
       tasksView.classList.add("active");
     } else if (hash === "#/profile") {
-      profileController.mount(); // <-- ТЕПЕРЬ ВЫЗЫВАЕТСЯ КОНТРОЛЛЕР
+      profileController.mount();
     }
   }
 }

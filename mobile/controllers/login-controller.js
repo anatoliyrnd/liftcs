@@ -59,9 +59,8 @@ export class LoginController {
       }
     };
   }
-
   unmount() {
     this.view.classList.remove("active");
-    this.form.onsubmit = null;
+    if (this.form) this.form.onsubmit = null; // Снимаем обработчик
   }
 }
