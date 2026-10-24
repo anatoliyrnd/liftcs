@@ -154,6 +154,7 @@ export class CardController {
 
       this.closeBtn.classList.remove("hidden");
     }
+
     this.renderComments();
   }
 
@@ -181,15 +182,16 @@ export class CardController {
       div.innerHTML = `
         <div class="comment-header">
             <span class="comment-author">${escapeHtml(n.user || "Сотрудник")}</span>
-            <span class="comment-date">${escapeHtml(dateStr)}</span>
+            <span class="comment-date">${escapeHtml(dateStr)}</span> 
         </div>
         <div class="comment-text">${escapeHtml(n.body || "")}</div>
         ${photoHtml}
       `;
       this.commentsContainer.appendChild(div);
     });
+
     this.commentsContainer.scrollTop = this.commentsContainer.scrollHeight;
-  }
+  } // <-- ЗДЕСЬ БЫЛА ПРОПУЩЕНА СКОБКА
 
   bindEvents() {
     this.view.querySelector(".btn-back").onclick = () => {
