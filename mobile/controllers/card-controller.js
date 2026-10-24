@@ -12,9 +12,8 @@ export class CardController {
     this.ticket = null;
     this.ticketId = null;
     this.currentPhotoBase64 = null;
-    this._cancelled = false; // Флаг отмены
+    this._cancelled = false;
 
-    // ... (все DOM-элементы остаются как были) ...
     this.view = document.getElementById("view-detail");
     this.titleEl = document.getElementById("detailTitle");
     this.loadingEl = document.getElementById("cardLoading");
@@ -41,7 +40,7 @@ export class CardController {
   }
 
   async mount(ticketId) {
-    this._cancelled = false; // Сбрасываем флаг
+    this._cancelled = false;
     this.ticketId = ticketId;
     this.view.classList.add("active");
     this.titleEl.textContent = `Заявка № ${ticketId}`;
@@ -58,7 +57,6 @@ export class CardController {
 
     await this.loadData();
 
-    // Если пользователь ушел с экрана во время загрузки — прерываемся
     if (this._cancelled) return;
 
     if (!this.ticket) {
@@ -76,7 +74,7 @@ export class CardController {
 
   unmount() {
     this._cancelled = true;
-    api.abortTag("card-detail"); // Отменяем висящие запросы
+    api.abortTag("card-detail");
     this.view.classList.remove("active");
   }
 
@@ -115,7 +113,6 @@ export class CardController {
     }
   }
 
-  // ... (Методы render() и renderComments() остаются без изменений) ...
   render() {
     if (this.detailAddress) {
       this.detailAddress.textContent =
@@ -174,11 +171,13 @@ export class CardController {
       const dateStr = formatTime(n.date);
       const div = document.createElement("div");
       div.className = "comment-item";
+
       let photoHtml = "";
       const safePhoto = safeUrl(n.photo_url);
       if (safePhoto) {
         photoHtml = `<img src="${escapeHtml(safePhoto)}" alt="" style="max-width:100%; border-radius:8px; margin-top:8px;">`;
       }
+
       div.innerHTML = `
         <div class="comment-header">
             <span class="comment-author">${escapeHtml(n.user || "Сотрудник")}</span>
@@ -192,7 +191,6 @@ export class CardController {
     this.commentsContainer.scrollTop = this.commentsContainer.scrollHeight;
   }
 
-  // ... (Метод bindEvents() остается без изменений, там уже стоят флаги disabled и try/finally) ...
   bindEvents() {
     this.view.querySelector(".btn-back").onclick = () => {
       window.location.hash = "#/list";
