@@ -7,15 +7,12 @@ class OfflineDB {
         if (!db.objectStoreNames.contains("config")) {
           db.createObjectStore("config", { keyPath: "key" });
         }
-        // Кэш открытых заявок
         if (!db.objectStoreNames.contains("tickets_cache")) {
           db.createObjectStore("tickets_cache", { keyPath: "id" });
         }
-        // Кэш задач от руководителя
         if (!db.objectStoreNames.contains("tasks_cache")) {
           db.createObjectStore("tasks_cache", { keyPath: "id" });
         }
-        // Очередь офлайн-действий (принять, закрыть, коммент)
         if (!db.objectStoreNames.contains("sync_queue")) {
           db.createObjectStore("sync_queue", { keyPath: "uuid" });
         }
@@ -37,13 +34,12 @@ class OfflineDB {
 
   // --- СПИСКИ ЗАЯВОК И ЗАДАЧ ---
   async saveList(type, items) {
-    // type = 'tickets' | 'tasks'
     const db = await this.dbPromise;
     const storeName = type === "tasks" ? "tasks_cache" : "tickets_cache";
     const tx = db.transaction(storeName, "readwrite");
     const store = tx.objectStore(storeName);
 
-    await store.clear(); // Полностью заменяем старый кэш
+    await store.clear();
     for (const item of items) {
       await store.put(item);
     }
@@ -59,7 +55,6 @@ class OfflineDB {
   // --- ОЧЕРЕДЬ ДЕЙСТВИЙ (SYNC QUEUE) ---
   async addToQueue(action) {
     const db = await this.dbPromise;
-    // Генерируем уникальный ID для действия, если его нет
     if (!action.uuid) {
       action.uuid =
         "act_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
@@ -86,25 +81,29 @@ class OfflineDB {
     const db = await this.dbPromise;
     await db.clear("sync_queue");
   }
-  async removeTicket(id) {
-    const db = await this.dbPromise;
-    await db.delete("tickets_cache", Number(id)); // Или String(id), в зависимости от типа
-  }
-  /**
-   * Точечное обновление заявки в кэше.
-   * Используется для оптимистичной записи после accept/comment.
-   */
+
+  // --- ТОЧЕЧНЫЕ ОБНОВЛЕНИЯ ---
   async updateTicket(id, patch) {
     const db = await this.dbPromise;
-    const all = await db.getAll("tickets_cache");
-    const target = all.find((t) => String(t.id) === String(id));
-    if (!target) return false;
     const tx = db.transaction("tickets_cache", "readwrite");
-    await tx.objectStore("tickets_cache").put({ ...target, ...patch });
+    const store = tx.objectStore("tickets_cache");
+
+    // Получаем текущую заявку
+    const target = await store.get(Number(id)); // или String(id) в зависимости от типа ключа
+    if (target) {
+      // Объединяем старые данные с новыми
+      await store.put({ ...target, ...patch });
+    }
     await tx.done;
-    return true;
+    return !!target;
   }
-  // --- ПОЛНАЯ ОЧИСТКА (При выходе или двойном предупреждении) ---
+
+  async removeTicket(id) {
+    const db = await this.dbPromise;
+    await db.delete("tickets_cache", Number(id)); // Или String(id)
+  }
+
+  // --- ПОЛНАЯ ОЧИСТКА ---
   async clearAll() {
     const db = await this.dbPromise;
     await db.clear("tickets_cache");

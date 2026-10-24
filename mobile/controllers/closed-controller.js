@@ -8,19 +8,22 @@ export class ClosedController {
     this.container = document.getElementById("closedContainer");
     this.periodBtns = this.view.querySelectorAll(".period-btn");
     this.currentPeriod = "1";
+    this._cancelled = false;
   }
 
   async mount() {
+    this._cancelled = false;
     this.view.classList.add("active");
     this.bindEvents();
     await this.loadData(this.currentPeriod);
   }
 
   unmount() {
+    this._cancelled = true;
+    api.abortTag("closed_list");
     this.view.classList.remove("active");
   }
 
-  // ... (методы bindEvents, loadData, render остаются без изменений из Волны 1) ...
   bindEvents() {
     this.periodBtns.forEach((btn) => {
       btn.onclick = () => {
@@ -43,6 +46,8 @@ export class ClosedController {
         "closed_list",
       );
 
+      if (this._cancelled) return;
+
       if (Array.isArray(response)) {
         this.render(response);
       } else {
@@ -50,6 +55,7 @@ export class ClosedController {
           '<div style="text-align:center; padding: 40px; color: var(--danger);">Ошибка формата данных</div>';
       }
     } catch (e) {
+      if (this._cancelled) return;
       this.container.innerHTML =
         '<div style="text-align:center; padding: 40px; color: var(--danger);">Нет связи с сервером.<br>Архив доступен только онлайн.</div>';
     }
