@@ -4,7 +4,6 @@ import { offlineDB } from "../offline-db.js";
 import { escapeHtml } from "../utils/sanitize.js";
 import { formatTime } from "../utils/format.js";
 import { ui } from "../components/ui-modal.js";
-import { API } from "../config.js"; // Для TICKETS_REFRESH_MS
 
 export class ListController {
   constructor() {
@@ -16,114 +15,107 @@ export class ListController {
     this.view = document.getElementById("view-list");
 
     this.tickets = [];
-
-    // Состояния для Polling
-    this.pollingTimer = null;
+    this._cancelled = false;
     this._inFlight = false;
+    this._pollTimer = null;
 
-    // Биндим контекст для visibilitychange
-    this._onVisibilityChange = this._onVisibilityChange.bind(this);
+    this._onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && !this._cancelled) {
+        this._poll(); // Немедленный запрос при возврате в фокус
+      }
+    };
   }
 
   async mount() {
+    this._cancelled = false;
     this.view.classList.add("active");
 
-    this.container.innerHTML =
-      '<div style="text-align:center; padding: 40px; color: var(--text-muted);">Загрузка заявок...</div>';
-
-    await this.loadData();
+    // 1. МГНОВЕННО показываем кэш (Stale-While-Revalidate)
+    this.tickets = await offlineDB.getList("tickets");
     this.render();
     this.bindEvents();
 
-    // Запускаем фоновое обновление и слежку за фокусом
-    this.startPolling();
+    // 2. Фоновая загрузка свежих данных
+    this._poll();
+
+    // 3. Слушаем возврат в фокус
     document.addEventListener("visibilitychange", this._onVisibilityChange);
   }
 
   unmount() {
-    this.stopPolling();
+    this._cancelled = true;
+    if (this._pollTimer) {
+      clearTimeout(this._pollTimer);
+      this._pollTimer = null;
+    }
     document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    api.abortTag("mobile_list");
     this.view.classList.remove("active");
   }
 
-  async loadData() {
-    try {
-      const response = await api.post({ data: "open" }, null, "mobile_list");
+  // УМНЫЙ POLLING
+  async _poll() {
+    // Проверки перед запросом
+    if (this._cancelled) return;
+    if (!navigator.onLine) return;
+    if (this._inFlight) return;
+    if (syncManager.isSyncing) return;
 
-      if (Array.isArray(response)) {
-        this.tickets = response;
-        await offlineDB.saveList("tickets", response);
-      } else {
-        throw new Error("Неверный формат ответа от сервера");
-      }
-    } catch (e) {
-      console.warn("[ListController] Нет сети, загрузка из кэша...", e);
-      this.tickets = await offlineDB.getList("tickets");
-    }
-  }
-
-  // ==========================================================================
-  // POLLING (Автообновление каждые 5 минут)
-  // ==========================================================================
-  startPolling() {
-    this.stopPolling();
-    this.pollingTimer = setInterval(() => this._poll(), API.TICKETS_REFRESH_MS);
-  }
-
-  stopPolling() {
-    if (this.pollingTimer) clearInterval(this.pollingTimer);
-    this.pollingTimer = null;
-  }
-
-  async _poll(force = false) {
-    // Если не форсировано, проверяем условия
-    if (!force) {
-      if (document.visibilityState !== "visible") return; // Свернуто
-      if (!navigator.onLine) return; // Офлайн
-      if (syncManager.isSyncing) return; // Идет общая синхронизация
-      if (this._inFlight) return; // Уже идет запрос (например, acceptAll)
+    // Сбрасываем старый таймер, если он был
+    if (this._pollTimer) {
+      clearTimeout(this._pollTimer);
+      this._pollTimer = null;
     }
 
     this._inFlight = true;
     try {
-      // Тихий запрос (без индикатора загрузки)
-      const response = await api.post({ data: "open" }, null);
+      await this.loadData();
+    } finally {
+      this._inFlight = false;
+
+      // Планируем следующий poll через 5 минут
+      if (!this._cancelled && document.visibilityState === "visible") {
+        this._pollTimer = setTimeout(() => {
+          this._pollTimer = null;
+          this._poll();
+        }, 300000); // 5 минут
+      }
+    }
+  }
+
+  async loadData() {
+    if (this.tickets.length === 0) {
+      this.container.innerHTML =
+        '<div style="text-align:center; padding: 40px; color: var(--text-muted);">Обновление...</div>';
+    }
+
+    try {
+      // ИСПРАВЛЕНО: правильный payload { data: "open" }
+      const response = await api.post({ data: "open" }, null, "mobile_list");
+
+      if (this._cancelled) return;
 
       if (Array.isArray(response)) {
         this.tickets = response;
         await offlineDB.saveList("tickets", response);
 
-        // Сохраняем позицию скролла перед перерисовкой
+        // Сохраняем скролл
         const appContent = document.querySelector(".app-content");
         const scrollTop = appContent ? appContent.scrollTop : 0;
 
-        this.render();
+        if (!this._cancelled) this.render();
 
-        // Восстанавливаем скролл
         if (appContent) appContent.scrollTop = scrollTop;
       }
     } catch (e) {
-      console.warn("[ListController] Ошибка фонового обновления", e);
-    } finally {
-      this._inFlight = false;
+      console.warn("[ListController] Нет связи, показываем кэш", e);
+      if (!this._cancelled && this.tickets.length === 0) {
+        this.container.innerHTML =
+          '<div style="text-align:center; padding: 40px; color: var(--danger);">Нет открытых заявок (Офлайн)</div>';
+      }
     }
   }
 
-  _onVisibilityChange() {
-    if (document.visibilityState === "visible") {
-      // Пользователь вернулся в приложение — делаем мгновенный refresh
-      // и перезапускаем таймер (чтобы 5 минут отсчитывались заново)
-      this._poll(true);
-      this.startPolling();
-    } else {
-      // Пользователь свернул приложение — останавливаем таймер
-      this.stopPolling();
-    }
-  }
-
-  // ==========================================================================
-  // РЕНДЕР
-  // ==========================================================================
   render() {
     if (!this.container) return;
 
@@ -210,7 +202,7 @@ export class ListController {
 
   bindEvents() {
     this.acceptAllBtn.onclick = async () => {
-      if (this._inFlight) return; // Защита от двойного клика
+      if (this.acceptAllBtn.disabled || this._inFlight) return;
 
       const newTickets = this.tickets.filter((t) => !t.notify_status);
       if (newTickets.length === 0) return;
@@ -218,7 +210,7 @@ export class ListController {
       if (!confirm(`Принять в работу ${newTickets.length} новых заявок?`))
         return;
 
-      this._inFlight = true; // Блокируем polling на время массового действия
+      this._inFlight = true; // Блокируем фоновый поллинг
       this.acceptAllBtn.disabled = true;
       this.acceptAllBtn.textContent = "Принятие...";
 
@@ -233,12 +225,15 @@ export class ListController {
           };
 
           const res = await syncManager.sendActionDirectly(action);
-
           if (res && res.status !== "error") {
             ticket.notify_status = 2;
+            // ВАЖНО: Синхронизируем кэш IDB, чтобы офлайн-режим показывал актуальный статус
             await offlineDB.updateTicket(ticket.id, { notify_status: 2 });
           }
         }
+      } catch (e) {
+        console.error("[ListController] acceptAll error", e);
+        await ui.alert("Произошла ошибка при массовом принятии.");
       } finally {
         this._inFlight = false;
         this.acceptAllBtn.disabled = false;
