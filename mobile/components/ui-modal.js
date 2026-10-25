@@ -72,4 +72,27 @@ export const ui = {
       buttons: [{ label: "OK", value: true, primary: true }],
     });
   },
+
+  toast(message) {
+    let toast = document.getElementById("uiToast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "uiToast";
+      toast.className = "ui-toast";
+      document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+
+    // Сбрасываем предыдущий таймер, если тост уже висел
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+
+    // Показываем
+    setTimeout(() => toast.classList.add("show"), 10);
+
+    // Скрываем через 3 секунды
+    this._toastTimer = setTimeout(() => {
+      toast.classList.remove("show");
+    }, 3000);
+  },
 };

@@ -1,4 +1,5 @@
 <?php
+sleep(2); // Заставляем сервер спать 20 секунд
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
@@ -10,7 +11,7 @@ $incoming = file_get_contents('php://input');
 
 // Если лог существует и весит больше 2 Мегабайт — очищаем его
 if (file_exists($debugLog) && filesize($debugLog) > 2 * 1024 * 1024) {
-    file_put_contents($debugLog, ""); 
+    file_put_contents($debugLog, "");
 }
 // Записываем запрос
 file_put_contents($debugLog, date('Y-m-d H:i:s') . " ВХОДЯЩИЙ ЗАПРОС:\n" . $incoming . "\n-------------------\n", FILE_APPEND);
@@ -19,14 +20,20 @@ file_put_contents($debugLog, date('Y-m-d H:i:s') . " ВХОДЯЩИЙ ЗАПРО
 // ============================================================
 // ФУНКЦИЯ КОНВЕРТАЦИИ ДАТ В UNIX TIMESTAMP
 // ============================================================
-function convertDatesToUnix(&$data) {
+function convertDatesToUnix(&$data)
+{
     // Только массивы, объекты игнорируем, чтобы не ломать структуру
-    if (!is_array($data)) return;
+    if (!is_array($data))
+        return;
 
     // Жестко задаем поля, где точно лежат даты (и не трогаем текст в истории)
     static $dateKeys = [
-        'date', 'close_date', 'repair_time', 'notify_date', 
-        'notify_date2', 'notify_date3'
+    'date',
+    'close_date',
+    'repair_time',
+    'notify_date',
+    'notify_date2',
+    'notify_date3'
     ];
 
     foreach ($data as $key => &$value) {
@@ -38,7 +45,7 @@ function convertDatesToUnix(&$data) {
             // 22.10.2026@14:08 -> 22.10.2026 14:08
             $normalized = str_replace(['/', '@'], ['.', ' '], $value);
             $timestamp = strtotime($normalized);
-            
+
             if ($timestamp !== false && $timestamp > 0) {
                 $value = $timestamp; // Заменяем строку на целое число (Unix time)
             }
@@ -116,8 +123,11 @@ if (isset($input['data']) && $input['data'] === 'get_user_settings') {
     $defaultProfile = [
         "status" => "ok",
         "profile" => [
-            "id" => 1, "surname" => "Иванов", "name" => "Иван", 
-            "patronymic" => "Иванович", "role" => "administrator"
+            "id" => 1,
+            "surname" => "Иванов",
+            "name" => "Иван",
+            "patronymic" => "Иванович",
+            "role" => "administrator"
         ],
         "column_settings" => [
             "order" => ["id", "address", "details", "staff_name", "notify_status", "department", "date", "repair_time"],
@@ -147,13 +157,16 @@ if (isset($input['action']) && $input['action'] === 'save_user_settings') {
 // ============================================================
 $mockFile = __DIR__ . '/mock_tickets.json';
 
-function getMockTickets($file) {
-    if (!file_exists($file)) return [];
+function getMockTickets($file)
+{
+    if (!file_exists($file))
+        return [];
     $data = json_decode(file_get_contents($file), true);
     return is_array($data) ? $data : [];
 }
 
-function saveMockTicket($file, $ticketData, $authorName = null) {
+function saveMockTicket($file, $ticketData, $authorName = null)
+{
     $existing = getMockTickets($file);
 
     $ticketData['id'] = rand(100000, 999999);
@@ -285,7 +298,7 @@ if ($curlError) {
 } else {
     // Логируем ответ сервера
     file_put_contents($debugLog, "ОТВЕТ ОТ СЕРВЕРА:\n" . $response . "\n===================\n", FILE_APPEND);
-    
+
     if (trim($response) === '') {
         http_response_code($httpCode);
         header('Content-Type: application/json; charset=utf-8');
@@ -294,15 +307,15 @@ if ($curlError) {
     }
 
     $decodedResponse = json_decode($response, true);
-    
+
     if (json_last_error() === JSON_ERROR_NONE) {
         if (is_array($decodedResponse)) {
             convertDatesToUnix($decodedResponse);
         }
-        
+
         // Отдаем фронтенду числа без экранирования слэшей
         $encoded = json_encode($decodedResponse, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
-        
+
         if ($encoded === false) {
             $encoded = $response;
         }

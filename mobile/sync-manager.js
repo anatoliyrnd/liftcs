@@ -75,7 +75,6 @@ export class SyncManager {
     }
   }
 
-  // Попытка отправить действие сразу (Принять, Коммент, Закрыть)
   async sendActionDirectly(action) {
     let attempts = 0;
     this.updateNetworkStatus("sync");
@@ -84,28 +83,35 @@ export class SyncManager {
       try {
         const res = await api.post(action.payload);
 
-        // Если это сетевая ошибка (нет связи) — пробуем еще раз
-        if (res && res.status === "error" && res.code === "network_error") {
+        // Если это сетевая ошибка или таймаут — пробуем еще раз
+        if (
+          res &&
+          res.status === "error" &&
+          (res.code === "network_error" || res.code === "aborted")
+        ) {
           throw new Error("network_error");
         }
 
-        // Если сервер ответил (даже если это логическая ошибка) — связь есть!
+        // Если сервер ответил — связь есть
         if (res) {
           this.updateNetworkStatus("online");
           return res;
         }
       } catch (e) {
         attempts++;
-        if (attempts < 3) await new Promise((r) => setTimeout(r, 2000)); // Пауза 2 сек
+        if (attempts < 3) await new Promise((r) => setTimeout(r, 2000));
       }
     }
 
-    // Если 3 попытки провалились (сеть так и не появилась) — сохраняем в офлайн-очередь
-    console.warn(
-      "[SyncManager] Сервер недоступен. Сохраняем в очередь:",
-      action,
-    );
-    await offlineDB.addToQueue(action);
+    // Если 3 попытки провалились — сохраняем в офлайн-очередь
+    console.warn("[SyncManager] Сохраняем в очередь:", action);
+    try {
+      await offlineDB.addToQueue(action);
+      console.log("[SyncManager] ✅ Успешно сохранено в IndexedDB");
+    } catch (dbError) {
+      console.error("[SyncManager] ❌ ОШИБКА СОХРАНЕНИЯ В БАЗУ:", dbError);
+    }
+
     this.updateNetworkStatus("offline");
     return { status: "offline_saved" };
   }
@@ -113,11 +119,13 @@ export class SyncManager {
   // Проход по очереди и отправка пачками
   async _processQueue() {
     const queue = await offlineDB.getQueue();
+    console.log(`[SyncManager] Найдено в очереди: ${queue.length}`);
     if (queue.length === 0) return;
 
     const sentUuids = [];
     for (const action of queue) {
       try {
+        console.log(`[SyncManager] Отправка действия: ${action.uuid}`);
         const res = await api.post(action.payload);
 
         // ЖЕЛЕЗОБЕТОННАЯ ПРОВЕРКА: если сеть отвалилась, бросаем исключение
@@ -129,6 +137,7 @@ export class SyncManager {
         // Сервер ответил — удаляем из очереди
         sentUuids.push(action.uuid);
       } catch (e) {
+        console.error("[SyncManager] Ошибка действия:", e);
         // Прерываем цикл, оставляя неотправленные в очереди
         throw new Error("network_error");
       }
@@ -136,6 +145,7 @@ export class SyncManager {
 
     if (sentUuids.length > 0) {
       await offlineDB.removeFromQueue(sentUuids);
+      console.log(`[SyncManager] Удалено из очереди: ${sentUuids.length}`);
     }
 
     // Если в очереди что-то осталось — запускаем таймер ретрая

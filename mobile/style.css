@@ -783,3 +783,40 @@ body {
     z-index: 90;
     pointer-events: none;
 }
+
+/* =========================================
+   15. ВСПЛЫВАЮЩИЙ ТОСТ (Уведомление)
+   ========================================= */
+.ui-toast {
+    position: fixed;
+    /* Опускаем чуть ниже, с учетом безопасной зоны экрана (челки) */
+    top: max(20px, env(safe-area-inset-top));
+    left: 50%;
+    /* Изначально прячем его далеко вверх через transform */
+    transform: translate(-50%, -200px);
+
+    background: var(--success);
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 9999;
+
+    /* Анимируем transform и opacity (работает намного плавнее) */
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
+    text-align: center;
+    max-width: 90%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ui-toast.show {
+    /* Выезжает на экран */
+    transform: translate(-50%, 0);
+    opacity: 1;
+}

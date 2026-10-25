@@ -2,8 +2,9 @@ import { openDB } from "./vendor/idb.js";
 
 class OfflineDB {
   constructor() {
-    this.dbPromise = openDB("LiftMechanicDB", 1, {
-      upgrade(db) {
+    // ПОДНЯЛИ ВЕРСИЮ ДО 2
+    this.dbPromise = openDB("LiftMechanicDB", 2, {
+      upgrade(db, oldVersion, newVersion, transaction) {
         if (!db.objectStoreNames.contains("config")) {
           db.createObjectStore("config", { keyPath: "key" });
         }
@@ -14,6 +15,10 @@ class OfflineDB {
           db.createObjectStore("tasks_cache", { keyPath: "id" });
         }
         if (!db.objectStoreNames.contains("sync_queue")) {
+          db.createObjectStore("sync_queue", { keyPath: "uuid" });
+        } else {
+          // Если база уже была, пересоздаем хранилище с правильным ключом
+          db.deleteObjectStore("sync_queue");
           db.createObjectStore("sync_queue", { keyPath: "uuid" });
         }
       },
@@ -71,12 +76,12 @@ class OfflineDB {
   async removeFromQueue(uuids) {
     const db = await this.dbPromise;
     const tx = db.transaction("sync_queue", "readwrite");
+    const store = tx.objectStore("sync_queue");
     for (const id of uuids) {
-      await tx.objectStore("sync_queue").delete(id);
+      store.delete(id); // Убрали await
     }
     await tx.done;
   }
-
   async clearQueue() {
     const db = await this.dbPromise;
     await db.clear("sync_queue");

@@ -99,7 +99,33 @@ document.addEventListener("DOMContentLoaded", () => {
       .register("./sw.js")
       .catch((err) => console.error(err));
   }
+  // ==========================================================================
+  // ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ ПО КНОПКЕ
+  // ==========================================================================
+  const syncBtn = document.getElementById("syncBtn");
+  if (syncBtn) {
+    syncBtn.addEventListener("click", async () => {
+      if (syncManager.isSyncing) return; // Защита от спама кликами
 
+      // Визуальный отклик: крутим иконку
+      const svgIcon = syncBtn.querySelector("svg");
+      if (svgIcon) {
+        svgIcon.style.transition = "transform 1s linear";
+        svgIcon.style.transform = "rotate(360deg)";
+      }
+
+      console.log("[UI] Принудительная синхронизация...");
+      await syncManager.startSync();
+
+      // Возвращаем иконку в исходное положение
+      setTimeout(() => {
+        if (svgIcon) {
+          svgIcon.style.transition = "none";
+          svgIcon.style.transform = "rotate(0deg)";
+        }
+      }, 1000);
+    });
+  }
   if (authStore.hasAccess() || localStorage.getItem("mob_offline_token")) {
     if (navigator.onLine) {
       syncManager.updateNetworkStatus("online");

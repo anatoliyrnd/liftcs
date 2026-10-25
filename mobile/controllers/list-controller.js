@@ -2,8 +2,9 @@ import { api } from "../api.js";
 import { syncManager } from "../sync-manager.js";
 import { offlineDB } from "../offline-db.js";
 import { escapeHtml } from "../utils/sanitize.js";
-import { formatTime } from "../utils/format.js";
+
 import { ui } from "../components/ui-modal.js";
+import { formatTime, formatShortDate } from "../utils/format.js";
 
 export class ListController {
   constructor() {
@@ -124,7 +125,9 @@ export class ListController {
       return s === 0 || status === null || status === undefined || isNaN(s);
     };
 
-    const newTickets = this.tickets.filter((t) => isTicketNew(t.notify_status));
+    const newTickets = this.tickets.filter(
+      (t) => isTicketNew(t.notify_status) && !t._offline_pending,
+    );
 
     this.totalCountEl.textContent = this.tickets.length;
 
@@ -158,16 +161,32 @@ export class ListController {
 
     sortedTickets.forEach((ticket) => {
       const isNew = isTicketNew(ticket.notify_status);
-      const timeString = formatTime(ticket.date || ticket.call_date);
+      const isPending = ticket._offline_pending === true;
 
+      const rawDate = ticket.date || ticket.call_date;
+      const shortDate = formatShortDate(rawDate);
+      const timeStr = formatTime(rawDate);
+      const timeString = shortDate !== "—" ? `${shortDate} ${timeStr}` : "—";
       const card = document.createElement("div");
       card.className = "ticket-card";
       card.dataset.id = ticket.id;
 
-      if (ticket.alert_level === 3)
+      // Визуальные маркеры
+      let statusClass = isNew ? "status-open" : "status-work";
+      let statusText = isNew ? "Новая" : "В работе";
+
+      if (isPending) {
+        statusClass = "status-pending";
+        statusText = "⏳ Ожидает";
+        card.style.borderLeftColor = "var(--text-muted)"; // Серый цвет
+        card.style.opacity = "0.7";
+      } else if (ticket.alert_level === 3) {
         card.style.borderLeftColor = "var(--danger)";
-      else if (isNew) card.style.borderLeftColor = "var(--warning)";
-      else card.style.borderLeftColor = "var(--success)";
+      } else if (isNew) {
+        card.style.borderLeftColor = "var(--warning)";
+      } else {
+        card.style.borderLeftColor = "var(--success)";
+      }
 
       const addressText =
         ticket.fullAddress || ticket.address || "Адрес не указан";
@@ -178,21 +197,23 @@ export class ListController {
           : detailsRaw;
 
       card.innerHTML = `
-                <div class="card-top">
-                    <span class="card-id">№ ${escapeHtml(ticket.id)}</span>
-                    <span class="card-status ${isNew ? "status-open" : "status-work"}">
-                        ${isNew ? "Новая" : "В работе"}
-                    </span>
-                </div>
-                <div class="card-address">${escapeHtml(addressText)}</div>
-                <div class="card-desc">${escapeHtml(shortDetails)}</div>
-                <div class="card-bottom">
-                    <span class="card-date">${escapeHtml(timeString)}</span>
-                    <span class="card-arrow">→</span>
-                </div>
-            `;
+        <div class="card-top">
+            <span class="card-id">№ ${escapeHtml(ticket.id)}</span>
+            <span class="card-status ${statusClass}">${statusText}</span>
+        </div>
+        <div class="card-address">${escapeHtml(addressText)}</div>
+        <div class="card-desc">${escapeHtml(shortDetails)}</div>
+        <div class="card-bottom">
+            <span class="card-date">${escapeHtml(timeString)}</span>
+            <span class="card-arrow">→</span>
+        </div>
+      `;
 
       card.addEventListener("click", () => {
+        if (isPending) {
+          ui.toast("Заявка ожидает синхронизации с сервером");
+          return; // Блокируем переход
+        }
         window.location.hash = `#/detail/${ticket.id}`;
       });
 
@@ -202,17 +223,21 @@ export class ListController {
 
   bindEvents() {
     this.acceptAllBtn.onclick = async () => {
-      if (this.acceptAllBtn.disabled || this._inFlight) return;
+      if (this.acceptAllBtn.disabled) return;
 
-      const newTickets = this.tickets.filter((t) => !t.notify_status);
+      const newTickets = this.tickets.filter(
+        (t) => !t.notify_status && !t._offline_pending,
+      );
       if (newTickets.length === 0) return;
 
       if (!confirm(`Принять в работу ${newTickets.length} новых заявок?`))
         return;
 
-      this._inFlight = true; // Блокируем фоновый поллинг
+      this._inFlight = true;
       this.acceptAllBtn.disabled = true;
       this.acceptAllBtn.textContent = "Принятие...";
+
+      let offlineMode = false; // Флаг "сеть пропала"
 
       try {
         for (const ticket of newTickets) {
@@ -224,12 +249,28 @@ export class ListController {
             },
           };
 
-          const res = await syncManager.sendActionDirectly(action);
-          if (res && res.status !== "error") {
+          if (offlineMode) {
+            // ОПТИМИЗАЦИЯ: Сеть уже упала, не ждем 6 секунд на каждую заявку
             ticket.notify_status = 2;
-            // ВАЖНО: Синхронизируем кэш IDB, чтобы офлайн-режим показывал актуальный статус
             await offlineDB.updateTicket(ticket.id, { notify_status: 2 });
+            await offlineDB.addToQueue(action);
+          } else {
+            // Первая попытка отправки
+            const res = await syncManager.sendActionDirectly(action);
+
+            if (res && res.status === "offline_saved") {
+              offlineMode = true; // Включаем офлайн-режим для остальных
+              ticket.notify_status = 2;
+              await offlineDB.updateTicket(ticket.id, { notify_status: 2 });
+            } else if (res && res.status !== "error") {
+              ticket.notify_status = 2;
+              await offlineDB.updateTicket(ticket.id, { notify_status: 2 });
+            }
           }
+        }
+
+        if (offlineMode) {
+          ui.toast("Нет сети. Заявки сохранены локально.");
         }
       } catch (e) {
         console.error("[ListController] acceptAll error", e);

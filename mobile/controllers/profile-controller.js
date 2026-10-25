@@ -44,12 +44,52 @@ export class ProfileController {
     if (this.view) this.view.classList.remove("active");
   }
 
-  renderData() {
+  async renderData() {
     const user = authStore.getUser();
     if (user) {
       this.view.querySelector("#profName").textContent = user.name || "Механик";
       this.view.querySelector("#profRole").textContent =
         user.role === "engineer" ? "Электромеханик" : user.role || "Сотрудник";
+    }
+
+    // --- НОВЫЙ БЛОК: Ожидание синхронизации ---
+    try {
+      const queue = await offlineDB.getQueue();
+      const counts = { callnote: 0, calledit: 0, callClose: 0 };
+
+      queue.forEach((item) => {
+        const action = item.payload?.action;
+        if (counts[action] !== undefined) counts[action]++;
+      });
+
+      let pendingHtml = "";
+      if (counts.callnote > 0)
+        pendingHtml += `<div style="margin-bottom: 4px;">💬 Комментарии: <b>${counts.callnote} шт.</b></div>`;
+      if (counts.calledit > 0)
+        pendingHtml += `<div style="margin-bottom: 4px;">🔄 Статусы: <b>${counts.calledit} шт.</b></div>`;
+      if (counts.callClose > 0)
+        pendingHtml += `<div style="margin-bottom: 4px;">🔒 Закрытия: <b>${counts.callClose} шт.</b></div>`;
+
+      let container = this.view.querySelector("#syncStatusContainer");
+      if (!container) {
+        container = document.createElement("div");
+        container.id = "syncStatusContainer";
+        container.style.cssText =
+          "background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); padding: 16px; border-radius: 12px; margin-bottom: 20px; color: var(--text-main); font-size: 14px;";
+
+        // Вставляем перед кнопкой выхода
+        const logoutBtn = this.view.querySelector("#logoutBtn");
+        logoutBtn.parentNode.insertBefore(container, logoutBtn);
+      }
+
+      if (pendingHtml) {
+        container.innerHTML = `<div style="font-weight: 700; color: var(--warning); margin-bottom: 8px;">⏳ Ожидают отправки:</div>${pendingHtml}`;
+        container.style.display = "block";
+      } else {
+        container.style.display = "none";
+      }
+    } catch (e) {
+      console.error("Ошибка чтения очереди", e);
     }
   }
 

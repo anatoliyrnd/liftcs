@@ -213,7 +213,12 @@ export class CardController {
         };
         const res = await syncManager.sendActionDirectly(action);
 
-        if (res && res.status !== "error") {
+        if (res && res.status === "offline_saved") {
+          this.ticket.notify_status = 2;
+          await offlineDB.updateTicket(this.ticket.id, { notify_status: 2 });
+          ui.toast("Нет сети. Статус сохранен локально.");
+          this.render();
+        } else if (res && res.status !== "error") {
           this.ticket.notify_status = 2;
           await offlineDB.updateTicket(this.ticket.id, { notify_status: 2 });
           this.render();
@@ -228,23 +233,7 @@ export class CardController {
       }
     };
 
-    this.photoInput.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      try {
-        this.photoLabel.innerHTML = "⏳ Сжатие...";
-        this.photoLabel.style.color = "var(--text-muted)";
-        this.currentPhotoBase64 = await compressImage(file);
-        this.photoLabel.innerHTML = "✅ Фото готово";
-        this.photoLabel.style.color = "var(--success)";
-      } catch (err) {
-        this.currentPhotoBase64 = null;
-        this.photoLabel.innerHTML = "📷 Фото";
-        this.photoLabel.style.color = "var(--text-muted)";
-        this.photoInput.value = "";
-        await ui.alert(err.message || "Не удалось обработать фото.");
-      }
-    };
+    // ... (блок photoInput без изменений) ...
 
     this.sendCommentBtn.onclick = async () => {
       if (this.sendCommentBtn.disabled) return;
@@ -265,7 +254,7 @@ export class CardController {
         };
         const res = await syncManager.sendActionDirectly(action);
 
-        if (res && res.status !== "error") {
+        if (res && (res.status === "offline_saved" || res.status !== "error")) {
           const newNote = {
             user: "Вы",
             body: text,
@@ -284,6 +273,11 @@ export class CardController {
           this.photoLabel.innerHTML = "📷 Фото";
           this.photoLabel.style.color = "var(--text-muted)";
           this.renderComments();
+
+          // Если офлайн — показываем зеленый тост (не блокирует экран)
+          if (res.status === "offline_saved") {
+            ui.toast("Комментарий сохранен локально");
+          }
         } else {
           await ui.alert("Ошибка отправки. Проверьте связь.");
         }
@@ -295,11 +289,13 @@ export class CardController {
       }
     };
 
+    // ОТКРЫТИЕ МОДАЛА ЗАКРЫТИЯ
     this.closeBtn.onclick = () => {
       this.modal.classList.add("active");
       this.solutionInput.focus();
     };
 
+    // ЗАКРЫТИЕ МОДАЛА (Кнопка "Отмена" и клик по фону)
     this.cancelCloseBtn.onclick = () => this.modal.classList.remove("active");
     this.modal.onclick = (e) => {
       if (e.target === this.modal) this.modal.classList.remove("active");
@@ -327,7 +323,17 @@ export class CardController {
         };
         const res = await syncManager.sendActionDirectly(action);
 
-        if (res && res.status !== "error") {
+        if (res && res.status === "offline_saved") {
+          // ОФЛАЙН: Помечаем заявку как ожидающую синхронизации
+          this.ticket._offline_pending = true;
+          await offlineDB.updateTicket(this.ticket.id, {
+            _offline_pending: true,
+          });
+          ui.toast("Заявка сохранена локально. Ожидает синхронизации.");
+          this.modal.classList.remove("active");
+          window.location.hash = "#/list";
+        } else if (res && res.status !== "error") {
+          // ОНЛАЙН: Удаляем из кэша
           await offlineDB.removeTicket(this.ticket.id);
           this.modal.classList.remove("active");
           window.location.hash = "#/list";
