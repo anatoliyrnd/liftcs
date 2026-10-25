@@ -21,7 +21,6 @@ function updateBottomNav(route) {
     }
   });
 }
-
 async function handleRoute() {
   let hash = window.location.hash || "#/list";
 
@@ -46,7 +45,7 @@ async function handleRoute() {
     return;
   }
 
-  // 2. Очистка ВСЕХ экранов (безопасно вызывать всегда)
+  // 2. ЕДИНАЯ ОЧИСТКА ВСЕХ ЭКРАНОВ (без дублей)
   cardController.unmount();
   profileController.unmount();
   listController.unmount();
@@ -89,7 +88,6 @@ async function handleRoute() {
     }
   }
 }
-
 document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("hashchange", handleRoute);
   handleRoute();
