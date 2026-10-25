@@ -134,4 +134,24 @@ document.addEventListener("DOMContentLoaded", () => {
       syncManager.updateNetworkStatus("offline");
     }
   }
+  // ==========================================================================
+  // ОБРАБОТКА ПОТЕРИ СЕССИИ (Токен протух, устройство не совпало и т.д.)
+  // ==========================================================================
+  window.addEventListener("auth:lost", (e) => {
+    console.warn("[App] Сессия потеряна. Причина:", e.detail?.reason);
+
+    // Очищаем локальные данные
+    authStore.clear();
+    localStorage.removeItem("mob_offline_token");
+    localStorage.removeItem("mob_offline_user");
+
+    // Показываем уведомление и редиректим на логин
+    ui.alert(
+      "Сессия истекла. Пожалуйста, авторизуйтесь снова.",
+      "Доступ закрыт",
+    ).then(() => {
+      window.location.hash = "#/login";
+      window.location.reload(); // Перезагрузка очистит состояние в памяти
+    });
+  });
 });

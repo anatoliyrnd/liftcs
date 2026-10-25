@@ -233,8 +233,23 @@ export class CardController {
       }
     };
 
-    // ... (блок photoInput без изменений) ...
-
+    this.photoInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        this.photoLabel.innerHTML = "⏳ Сжатие...";
+        this.photoLabel.style.color = "var(--text-muted)";
+        this.currentPhotoBase64 = await compressImage(file);
+        this.photoLabel.innerHTML = "✅ Фото готово";
+        this.photoLabel.style.color = "var(--success)";
+      } catch (err) {
+        this.currentPhotoBase64 = null;
+        this.photoLabel.innerHTML = "📷 Фото";
+        this.photoLabel.style.color = "var(--text-muted)";
+        this.photoInput.value = "";
+        await ui.alert(err.message || "Не удалось обработать фото.");
+      }
+    };
     this.sendCommentBtn.onclick = async () => {
       if (this.sendCommentBtn.disabled) return;
       const text = this.composerTextarea.value.trim();

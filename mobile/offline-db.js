@@ -77,9 +77,10 @@ class OfflineDB {
     const db = await this.dbPromise;
     const tx = db.transaction("sync_queue", "readwrite");
     const store = tx.objectStore("sync_queue");
-    for (const id of uuids) {
-      store.delete(id); // Убрали await
-    }
+
+    // Ждем завершения всех запросов на удаление
+    await Promise.all(uuids.map((id) => store.delete(id)));
+
     await tx.done;
   }
   async clearQueue() {

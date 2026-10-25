@@ -8,14 +8,12 @@ export class ProfileController {
     this.view = null;
   }
 
-  mount() {
-    // Удаляем старый экран, если он есть (полная пересборка)
+  async mount() {
     if (this.view) this.view.remove();
 
     this.view = document.createElement("div");
     this.view.id = "view-profile";
     this.view.className = "view active";
-
     this.view.innerHTML = `
         <div class="list-header"><h2>Профиль</h2></div>
         
@@ -37,7 +35,7 @@ export class ProfileController {
     this.container.appendChild(this.view);
 
     this.bindEvents();
-    this.renderData();
+    await this.renderData();
   }
 
   unmount() {
