@@ -26,7 +26,11 @@ const ASSETS_TO_CACHE = [
   "./utils/format.js",
   "./vendor/idb.js",
 ];
-
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -40,7 +44,7 @@ self.addEventListener("install", (event) => {
       );
     }),
   );
-  self.skipWaiting(); // Активируем новый SW немедленно
+  //
 });
 
 self.addEventListener("activate", (event) => {

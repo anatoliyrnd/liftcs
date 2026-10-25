@@ -93,9 +93,48 @@ document.addEventListener("DOMContentLoaded", () => {
   handleRoute();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker
-      .register("./sw.js")
-      .catch((err) => console.error(err));
+    // Если при загрузке страницы уже есть контроллер, значит это не первый запуск
+    let isFirstInstall = !navigator.serviceWorker.controller;
+
+    navigator.serviceWorker.register("./sw.js").then((reg) => {
+      // Проверяем, не ждет ли уже новый SW (например, пользователь отказался от обновления в прошлый раз)
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        promptUpdate(reg);
+      }
+
+      // Слушаем фоновую установку нового SW
+      reg.addEventListener("updatefound", () => {
+        const newWorker = reg.installing;
+
+        newWorker.addEventListener("statechange", () => {
+          // Если новый SW установлен и есть активный контроллер (старая версия)
+          if (
+            newWorker.state === "installed" &&
+            navigator.serviceWorker.controller
+          ) {
+            promptUpdate(reg);
+          }
+        });
+      });
+    });
+
+    // Перезагружаем страницу ТОЛЬКО когда SW фактически сменился
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (isFirstInstall) return;
+      window.location.reload();
+    });
+
+    function promptUpdate(reg) {
+      ui.confirm(
+        "Доступна новая версия приложения. Перезагрузить страницу сейчас?",
+        "Обновление",
+      ).then((yes) => {
+        if (yes) {
+          // Отправляем команду новому SW активироваться
+          reg.waiting.postMessage("SKIP_WAITING");
+        }
+      });
+    }
   }
   // ==========================================================================
   // ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ ПО КНОПКЕ
